@@ -35,7 +35,7 @@ with tempfile.TemporaryDirectory() as tmp:
     e.configure_amnezia(s,api)
     after=api.call('inbounds/list')
     assert len(before)==len(after)==1
-    assert json.loads(before[0]['settings'])==json.loads(after[0]['settings'])
+    assert e.json_object(before[0]['settings'])==e.json_object(after[0]['settings'])
     assert before[0]['id']==after[0]['id']
     links=api.call('clients/links/single443-amneziawg')
     assert isinstance(links,list) and len(links)==1

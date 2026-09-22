@@ -35,6 +35,12 @@ def write_json(path, data):
     tmp.chmod(0o600)
     tmp.replace(path)
 
+def json_object(value):
+    # 3.8.5 emits JSON objects; older responses may contain JSON text.
+    result = json.loads(value) if isinstance(value, (str, bytes)) else json.loads(json.dumps(value))
+    require(isinstance(result, dict), 'Expected JSON object from panel')
+    return result
+
 def load():
     return json.loads((STATE / 'state.json').read_text())
 
@@ -296,7 +302,7 @@ def split_subscriptions(s, api, rows):
         matches = [row for row in rows if row.get('remark') == 'single443-'+name]
         require(len(matches) == 1, 'Migration requires exactly five original managed inbounds')
         row = dict(matches[0])
-        settings = json.loads(row['settings'])
+        settings = json_object(row['settings'])
         clients = settings.get('clients', [])
         require(len(clients) == 1, 'Migration refuses inbounds with additional clients')
         client = clients[0]
@@ -314,7 +320,7 @@ def split_subscriptions(s, api, rows):
     for row in plans:
         actual = [x for x in verified if x.get('id') == row['id']]
         require(len(actual) == 1, 'Migration API verification failed')
-        require(json.loads(actual[0]['settings']).get('clients') == json.loads(row['settings'])['clients'],
+        require(json_object(actual[0]['settings']).get('clients') == json_object(row['settings'])['clients'],
                 'Migration did not preserve client fields; rolling back')
     s['sub_ids'] = ids
     s.pop('sub_id', None)
@@ -351,7 +357,7 @@ def configure_amnezia(s, api):
     row = matches[0]
     require(row.get('protocol') == name and row.get('port') == 51820 and row.get('enable') is True,
             'Managed AmneziaWG topology changed')
-    data = json.loads(row['settings'])
+    data = json_object(row['settings'])
     clients = [c for c in data.get('clients',[]) if c.get('email') == 'single443-amneziawg']
     require(len(clients) == 1 and clients[0].get('subId') == s['sub_ids'].get(name),
             'Managed AmneziaWG subscription changed')
@@ -388,8 +394,8 @@ def inbounds():
             # Preserve users, counters and manual panel changes. Verify essential topology only.
             old = matches[0]
             require(all(old.get(k) == item[k] for k in ('port', 'protocol', 'listen', 'enable')), 'Managed inbound topology changed; refusing to overwrite')
-            stream = json.loads(old['streamSettings'])
-            expected = json.loads(item['streamSettings'])
+            stream = json_object(old['streamSettings'])
+            expected = json_object(item['streamSettings'])
             require(all(stream.get(k) == expected[k] for k in ('network','security')), 'Managed transport/security changed')
             for block, keys in {'wsSettings':('path',), 'xhttpSettings':('path','mode','host'),
                                 'grpcSettings':('serviceName',), 'realitySettings':('target','serverNames','privateKey','shortIds'),

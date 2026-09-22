@@ -163,6 +163,14 @@ class IncySubscriptionTests(unittest.TestCase):
 
 
 class NamingAndAmneziaTests(unittest.TestCase):
+    def test_panel_json_object_and_legacy_text(self):
+        value={'clients':[{'email':'keep'}]}
+        for raw in (value,json.dumps(value)):
+            result=e.json_object(raw)
+            self.assertEqual(result,value)
+            result['clients'][0]['email']='changed'
+            self.assertEqual(value['clients'][0]['email'],'keep')
+
     def test_flags_and_stable_numbers(self):
         s=state();s['country_code']='US'
         self.assertEqual(e.inbound_label(s,'reality'),'🇺🇸 User1 — REALITY')
