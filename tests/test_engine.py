@@ -85,7 +85,6 @@ class PayloadTests(unittest.TestCase):
         urls+=['trojan://secret@1.2.3.4.cdn-one.org:443?type=grpc&security=tls','hysteria2://auth@1.2.3.4.cdn-one.org:443?sni=1.2.3.4.cdn-one.org']
         e.validate_links(base64.b64encode('\n'.join(urls).encode()),state())
 
-if __name__=='__main__':unittest.main()
 
 class MigrationTests(unittest.TestCase):
     def legacy(self):
@@ -134,3 +133,31 @@ class MigrationTests(unittest.TestCase):
         e.validate_links(body,state(),'ws')
         with self.assertRaises(RuntimeError): e.validate_links(body+b'\n'+body,state(),'ws')
         with self.assertRaises(RuntimeError): e.validate_links(body,state(),'reality')
+
+
+class IncySubscriptionTests(unittest.TestCase):
+    def test_routing_metadata_not_counted_as_connection(self):
+        links = {
+            'reality': 'vless://id@1.2.3.4.cdn-one.org:443?type=tcp&security=reality',
+            'ws': 'vless://id@1.2.3.4.cdn-one.org:443?type=ws&security=tls',
+            'xhttp': 'vless://id@1.2.3.4.cdn-one.org:443?type=xhttp&security=tls',
+            'grpc': 'trojan://password@1.2.3.4.cdn-one.org:443?type=grpc&security=tls',
+            'hysteria': 'hysteria2://password@1.2.3.4.cdn-one.org:443',
+        }
+        routes = ['incy://autorouting/onadd/https://example.com/routing/incy.json',
+                  'incy://routing/onadd/eyJOYW1lIjoiVGVzdCJ9']
+        for name, link in links.items():
+            for route in routes:
+                for encode in (lambda x:x, base64.b64encode):
+                    with self.subTest(name=name,route=route,encoded=encode is base64.b64encode):
+                        e.validate_links(encode((link+'\n'+route+'\n').encode()),state(),name)
+                        with self.assertRaises(RuntimeError):
+                            e.validate_links(encode((link+'\n'+link+'\n'+route).encode()),state(),name)
+
+    def test_metadata_alone_and_unknown_entries_fail(self):
+        route=b'incy://autorouting/onadd/https://example.com/routing.json'
+        for body in (route, base64.b64encode(route),
+                     b'vless://id@1.2.3.4.cdn-one.org:443?type=ws&security=tls\nhttps://example.com/unknown'):
+            with self.assertRaises(RuntimeError): e.validate_links(body,state(),'ws')
+
+if __name__=='__main__':unittest.main()

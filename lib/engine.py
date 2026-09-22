@@ -432,8 +432,21 @@ def validate_links(body, s, name=None):
             text = base64.b64decode(text+'='*(-len(text)%4),validate=True).decode()
         except (ValueError, UnicodeError):
             raise RuntimeError('Subscription returned neither links nor valid base64; possible profile HTML') from None
-    urls = [x.strip() for x in text.splitlines() if '://' in x]
-    require(len(urls) == (1 if name else 5), 'Unexpected subscription client count')
+    urls = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # Upstream appends INCY routing instructions to raw subscriptions,
+        # including before base64 encoding. They are not proxy connections.
+        if line.startswith(('incy://autorouting/onadd/', 'incy://routing/onadd/')):
+            continue
+        require(urllib.parse.urlsplit(line).scheme in ('vless','trojan','hy2','hysteria2'),
+                'Unexpected subscription entry type')
+        urls.append(line)
+    expected_count = 1 if name else 5
+    require(len(urls) == expected_count,
+            f'Unexpected subscription client count: expected {expected_count}, got {len(urls)}')
     managed = []
     for url in urls:
         u = urllib.parse.urlsplit(url)

@@ -48,6 +48,8 @@ rollback() {
   systemctl daemon-reload
   if declare -F firewall_restore >/dev/null; then firewall_restore; fi
   if [[ $XUI_WAS_ACTIVE == yes ]]; then systemctl start x-ui; fi
+  # enable/disable during firewall restoration can change unit links.
+  systemctl daemon-reload
   if [[ $NGINX_WAS_ACTIVE == yes ]]; then nginx -t && systemctl start nginx; fi
 }
 on_error() {
