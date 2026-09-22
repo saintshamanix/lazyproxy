@@ -9,7 +9,7 @@ spec=importlib.util.spec_from_file_location('engine',root/'lib/engine.py')
 e=importlib.util.module_from_spec(spec);spec.loader.exec_module(e)
 out=Path(sys.argv[1]).resolve();out.mkdir(parents=True,exist_ok=True)
 s=dict(domain='web.example.com',reality_domain='reality.example.com',panel_path='/randomPanel/',ws_path='/randomWs',
-       xhttp_path='/randomXhttp/',grpc_service='randomGrpc',sub_id='subid',private_key=sys.argv[2],public_key=sys.argv[3],short_id='abcdef0123456789',
+       xhttp_path='/randomXhttp/',grpc_service='randomGrpc',sub_ids={name: name+'-test' for name in e.CLIENT_NAMES},private_key=sys.argv[2],public_key=sys.argv[3],short_id='abcdef0123456789',
        trojan_password='not-a-real-password',hysteria_auth='not-a-real-auth',
        uuids=dict(reality='b6f091c7-53aa-4ff7-a8c4-4a0f98c78e01',ws='b6f091c7-53aa-4ff7-a8c4-4a0f98c78e02',xhttp='b6f091c7-53aa-4ff7-a8c4-4a0f98c78e03'))
 e.CERT=str(out)+'/'

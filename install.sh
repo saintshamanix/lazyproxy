@@ -20,6 +20,10 @@ if [[ ! -f "$ROOT/lib/common.sh" ]]; then
   bash "$bootstrap/src/install.sh" "$@"
   exit
 fi
+if [[ ${1:-} == --update-only ]]; then
+  [[ $# == 1 ]] || { echo '--update-only takes no additional options'; exit 2; }
+  exec bash "$ROOT/update.sh"
+fi
 # shellcheck source=lib/common.sh
 source "$ROOT/lib/common.sh"
 for module in 3xui certs subscription inbounds nginx firewall; do source "$ROOT/lib/$module.sh"; done
@@ -29,7 +33,7 @@ while (($#)); do
   case $1 in
     --version) PANEL_VERSION=${2:?Missing version}; shift 2 ;;
     --config) CONFIG=${2:?Missing config}; shift 2 ;;
-    --help) echo 'install.sh [--version latest|3.8.5] [--config /root/config.env]'; exit 0 ;;
+    --help) echo 'install.sh [--version latest|3.8.5] [--config /root/config.env] | --update-only'; exit 0 ;;
     *) die "Unknown option: $1" ;;
   esac
 done

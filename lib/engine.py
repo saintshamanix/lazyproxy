@@ -21,6 +21,7 @@ import uuid
 
 STATE = Path('/etc/single443')
 CERT = '/etc/letsencrypt/live/single443/'
+CLIENT_NAMES = ('reality', 'ws', 'xhttp', 'grpc', 'hysteria')
 
 def require(ok, message):
     if not ok:
@@ -73,7 +74,7 @@ def init():
         require(s['ip'] == ip and s['domain'] == names[0], 'IP/domain changed; automatic migration is intentionally refused')
         return
     s = dict(ip=ip, domain=names[0], reality_domain=names[1], username='admin_' + secrets.token_hex(5),
-             password=secrets.token_urlsafe(32), sub_id=secrets.token_hex(16), configured=False,
+             password=secrets.token_urlsafe(32), sub_ids={name: secrets.token_hex(16) for name in CLIENT_NAMES}, configured=False,
              installed_version='', short_id=secrets.token_hex(8), trojan_password=secrets.token_urlsafe(32),
              hysteria_auth=secrets.token_urlsafe(32), grpc_service='g' + secrets.token_hex(12))
     for key in ('panel_path', 'ws_path', 'xhttp_path', 'sub_path', 'json_path', 'clash_path'):
@@ -236,7 +237,7 @@ def inbound_payloads(s):
     result = []
     for name, port in [('reality',8443), ('ws',10001), ('xhttp',10002), ('grpc',10003), ('hysteria',443)]:
         protocol = 'hysteria' if name == 'hysteria' else 'trojan' if name == 'grpc' else 'vless'
-        client = dict(email='single443-'+name, enable=True, subId=s['sub_id'], limitIp=0, totalGB=0, expiryTime=0, reset=0, tgId=0)
+        client = dict(email='single443-'+name, enable=True, subId=s['sub_ids'][name], limitIp=0, totalGB=0, expiryTime=0, reset=0, tgId=0)
         if protocol == 'vless':
             client.update(id=s['uuids'][name], flow='xtls-rprx-vision' if name == 'reality' else '')
         elif protocol == 'trojan':
@@ -258,6 +259,44 @@ def inbound_payloads(s):
                            allocate=json.dumps(dict(strategy='always', refresh=5, concurrency=3)), total=0, expiryTime=0))
     return result
 
+def split_subscriptions(s, api, rows):
+    """Migrate only the original five installer clients, preserving other fields."""
+    if 'sub_ids' in s:
+        return
+    legacy = s.get('sub_id')
+    require(bool(legacy), 'Missing subscription state')
+    plans = []
+    ids = {name: secrets.token_hex(16) for name in CLIENT_NAMES}
+    # Validate all five before any mutation; unknown/manual layouts need review.
+    for name in CLIENT_NAMES:
+        matches = [row for row in rows if row.get('remark') == 'single443-'+name]
+        require(len(matches) == 1, 'Migration requires exactly five original managed inbounds')
+        row = dict(matches[0])
+        settings = json.loads(row['settings'])
+        clients = settings.get('clients', [])
+        require(len(clients) == 1, 'Migration refuses inbounds with additional clients')
+        client = clients[0]
+        require(client.get('email') == 'single443-'+name and client.get('subId') == legacy,
+                'Managed client identity/subscription changed; migration refused')
+        credential = 'id' if name in ('reality','ws','xhttp') else 'password' if name == 'grpc' else 'auth'
+        expected = s['uuids'][name] if credential == 'id' else s['trojan_password'] if credential == 'password' else s['hysteria_auth']
+        require(client.get(credential) == expected, 'Managed credentials changed; migration refused')
+        client['subId'] = ids[name]
+        row['settings'] = json.dumps(settings)
+        plans.append(row)
+    for row in plans:
+        api.call('inbounds/update/'+str(row['id']), row)
+    verified = api.call('inbounds/list')
+    for row in plans:
+        actual = [x for x in verified if x.get('id') == row['id']]
+        require(len(actual) == 1, 'Migration API verification failed')
+        require(json.loads(actual[0]['settings']).get('clients') == json.loads(row['settings'])['clients'],
+                'Migration did not preserve client fields; rolling back')
+    s['sub_ids'] = ids
+    s.pop('sub_id', None)
+    save(s)
+
+
 def inbounds():
     s = load()
     api = API(s)
@@ -269,6 +308,7 @@ def inbounds():
         save(s)
     existing = api.call('inbounds/list')
     require(isinstance(existing, list), 'Unknown inbound list schema')
+    split_subscriptions(s, api, existing)
     for item in inbound_payloads(s):
         matches = [x for x in existing if x.get('remark') == item['remark']]
         require(len(matches) <= 1, 'Duplicate managed inbound; refusing ambiguous update')
@@ -290,6 +330,15 @@ def inbounds():
             continue
         require(not any(x.get('port') == item['port'] for x in existing), 'Inbound port conflict')
         api.call('inbounds/add', item)
+    settings = api.call('setting/all', {})
+    routing_changes = dict(subIncyEnableRouting=True,
+                           subIncyRoutingRules='https://'+s['domain']+'/routing/incy.json')
+    if set(routing_changes) <= set(settings):
+        if any(settings[k] != v for k, v in routing_changes.items()):
+            settings.update(routing_changes)
+            api.call('setting/update', settings)
+    else:
+        print('INCY routing settings unavailable in this panel version; static URL remains available')
     candidate = api.call('server/getConfigJson')
     require(isinstance(candidate, dict) and 'inbounds' in candidate, 'No generated Xray config from API')
     write_json(STATE/'candidate-xray.json', candidate)
@@ -347,18 +396,23 @@ def render(templates):
         main.write_text(text+'\n'+include+'\n')
     Path('/etc/nginx/conf.d/single443-acme.conf').unlink(missing_ok=True)
     routing = Path('/var/www/single443/routing')
-    # Explicit placeholders: no invented routing preferences or unvalidated geosite policy.
-    for name,body in [('incy.json',json.dumps(dict(Name='single443 placeholder', BlockSites=[], BlockIp=[], DirectSites=[], DirectIp=[], ProxySites=[], ProxyIp=[]),indent=2)+'\n'),
-                      ('clash.yaml','# Empty domain rule-provider; customize before use.\npayload: []\n'),
-                      ('mihomo.yaml','# Empty domain rule-provider; customize before use.\npayload: []\n')]:
-        f=routing/name
+    routing.mkdir(parents=True, exist_ok=True)
+    # User-supplied INCY profile: publish the exact bytes, without normalization.
+    profile = (Path(templates)/'routing/incy.json').read_bytes()
+    require(isinstance(json.loads(profile), dict), 'Invalid INCY JSON')
+    (routing/'incy.json').write_bytes(profile)
+    (routing/'incy.json').chmod(0o644)
+    for name in ('clash.yaml', 'mihomo.yaml'):
+        f = routing/name
         if not f.exists():
-            f.write_text(body)
+            f.write_text('# Empty domain rule-provider; customize before use.\npayload: []\n')
             f.chmod(0o644)
-    access = f'Panel: https://{s["domain"]}{s["panel_path"]}\nUsername: {s["username"]}\nPassword: {s["password"]}\nSubscription: https://{s["domain"]}{d["main_path"]}{s["sub_id"]}\n'
-    if d['clash_path']:
-        access += f'Mihomo: https://{s["domain"]}{d["clash_path"]}{s["sub_id"]}\n'
-    access += f'INCY placeholder: https://{s["domain"]}/routing/incy.json\n'
+    access = f'Panel: https://{s["domain"]}{s["panel_path"]}\nUsername: {s["username"]}\nPassword: {s["password"]}\n'
+    for name, sub_id in s['sub_ids'].items():
+        access += f'\n{name} subscription: https://{s["domain"]}{d["main_path"]}{sub_id}\n'
+        if d['clash_path']:
+            access += f'{name} Mihomo: https://{s["domain"]}{d["clash_path"]}{sub_id}\n'
+    access += f'\nINCY routing: https://{s["domain"]}/routing/incy.json\n'
     (STATE/'access.txt').write_text(access)
     (STATE/'access.txt').chmod(0o600)
 
@@ -371,7 +425,7 @@ def curl_body(host, port, path, tls=True, address=None, user_agent='curl/single4
     require(result.returncode == 0, 'HTTP/TLS request failed (details omitted to protect secret URL)')
     return result.stdout
 
-def validate_links(body, s):
+def validate_links(body, s, name=None):
     text = body.decode().strip()
     if not re.search(r'(?:vless|trojan|hy2|hysteria2)://', text):
         try:
@@ -379,7 +433,7 @@ def validate_links(body, s):
         except (ValueError, UnicodeError):
             raise RuntimeError('Subscription returned neither links nor valid base64; possible profile HTML') from None
     urls = [x.strip() for x in text.splitlines() if '://' in x]
-    require(len(urls) >= 5, 'Subscription missing managed clients')
+    require(len(urls) == (1 if name else 5), 'Unexpected subscription client count')
     managed = []
     for url in urls:
         u = urllib.parse.urlsplit(url)
@@ -388,11 +442,17 @@ def validate_links(body, s):
         q=urllib.parse.parse_qs(u.query)
         require(u.port == 443, 'Subscription advertises an internal port')
         managed.append((u.scheme, q.get('type',[''])[0], q.get('security',[''])[0]))
-    require(('vless','tcp','reality') in managed or ('vless','raw','reality') in managed, 'REALITY external link missing')
-    for network in ('ws','xhttp'):
-        require(('vless',network,'tls') in managed, f'{network} external TLS link missing')
-    require(('trojan','grpc','tls') in managed, 'Trojan gRPC link missing')
-    require(any(x[0] in ('hysteria2','hy2','hysteria') for x in managed), 'Hysteria2 link missing')
+    expected = {
+        'reality': {('vless','tcp','reality'), ('vless','raw','reality')},
+        'ws': {('vless','ws','tls')}, 'xhttp': {('vless','xhttp','tls')},
+        'grpc': {('trojan','grpc','tls')},
+    }
+    for key in ([name] if name else CLIENT_NAMES):
+        if key == 'hysteria':
+            require(any(x[0] in ('hysteria2','hy2') for x in managed), 'Hysteria2 link missing')
+        else:
+            require(bool(expected[key].intersection(managed)), key+' external link missing')
+
 
 def diagnose():
     s=load()
@@ -424,15 +484,16 @@ def diagnose():
     check('public panel URL from VPS',lambda: curl_body(s['domain'],443,s['panel_path']))
     try:
         d=discover()
-        check('subscription backend with Host/SNI and link semantics',lambda: validate_links(curl_body(d['host'],d['port'],d['main_path']+s['sub_id'],d['tls'],d['address'],'v2rayN/7.0'),s))
-        check('public subscription with link semantics',lambda: validate_links(curl_body(s['domain'],443,d['main_path']+s['sub_id'],user_agent='v2rayN/7.0'),s))
-        if d['clash_path']:
-            check('public Mihomo subscription',lambda: require(b'proxies:' in curl_body(s['domain'],443,d['clash_path']+s['sub_id'],user_agent='mihomo/1.19'),'Unexpected Mihomo body'))
+        for name, sub_id in s['sub_ids'].items():
+            check(name+' subscription backend with Host/SNI',lambda name=name, sub_id=sub_id: validate_links(curl_body(d['host'],d['port'],d['main_path']+sub_id,d['tls'],d['address'],'v2rayN/7.0'),s,name))
+            check(name+' public subscription: exactly one client',lambda name=name, sub_id=sub_id: validate_links(curl_body(s['domain'],443,d['main_path']+sub_id,user_agent='v2rayN/7.0'),s,name))
+            if d['clash_path']:
+                check(name+' public Mihomo subscription',lambda sub_id=sub_id: require(b'proxies:' in curl_body(s['domain'],443,d['clash_path']+sub_id,user_agent='mihomo/1.19'),'Unexpected Mihomo body'))
     except Exception as e:
         failures.append('discovery')
         print('FAIL subscription discovery: '+str(e))
     for name in ('incy.json','clash.yaml','mihomo.yaml'):
-        check('routing placeholder '+name,lambda name=name: curl_body(s['domain'],443,'/routing/'+name))
+        check('routing file '+name,lambda name=name: curl_body(s['domain'],443,'/routing/'+name))
     def bindings():
         text=subprocess.check_output(['ss','-H','-lnt'],text=True)
         ports = {2053,2096,7443,8443,10001,10002,10003}

@@ -4,6 +4,7 @@ install_acme_web() {
   mkdir -p /var/www/single443/.well-known/acme-challenge /var/www/single443/routing
   chmod 755 /var/www/single443 /var/www/single443/.well-known /var/www/single443/.well-known/acme-challenge /var/www/single443/routing
   install -m 644 "$ROOT/templates/decoy/index.html" /var/www/single443/index.html
+  install -m 644 "$ROOT/templates/decoy/site.js" /var/www/single443/site.js
   if [[ ! -f /etc/nginx/conf.d/single443-web.conf ]]; then
     rm -f /etc/nginx/sites-enabled/default
     cat > /etc/nginx/conf.d/single443-acme.conf <<'EOF'

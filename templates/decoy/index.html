@@ -1,1 +1,23 @@
-<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Field Notes</title><style>body{margin:12vh auto;padding:0 24px;max-width:700px;background:#f6f4ed;color:#28352c;font:18px/1.7 Georgia,serif}small{letter-spacing:.2em}h1{font-size:clamp(40px,8vw,72px);line-height:1.1}article{border-top:1px solid #bec7b9;margin-top:50px;padding-top:24px}footer{margin-top:70px;font-size:14px}</style><small>FIELD NOTES</small><h1>A little room<br>for quiet ideas.</h1><p>Observations on landscapes, materials and everyday design.</p><article><h2>Light and texture</h2><p>Natural light reveals the small details: the grain of a wooden surface, shadows across stone, and the gentle changes of the seasons.</p></article><footer>A personal collection of notes.</footer></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Field Notes</title>
+<style>
+:root{color-scheme:light;--paper:#f6f4ed;--ink:#28352c;--line:#bec7b9}
+:root[data-theme="dark"]{color-scheme:dark;--paper:#202923;--ink:#e2e9dd;--line:#59685b}
+body{margin:8vh auto;padding:0 24px;max-width:760px;background:var(--paper);color:var(--ink);font:18px/1.7 Georgia,serif;transition:background .3s,color .3s}
+header{display:flex;justify-content:space-between;align-items:center;gap:20px}small{letter-spacing:.2em}h1{font-size:clamp(40px,8vw,72px);line-height:1.1}article{border-top:1px solid var(--line);margin-top:35px;padding-top:20px}footer{margin-top:60px;font-size:14px}button{background:transparent;color:inherit;border:1px solid var(--line);border-radius:20px;padding:8px 16px;font:inherit;cursor:pointer}button:hover,button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}button:focus-visible{outline:3px solid #a88c4a;outline-offset:3px}nav{display:flex;flex-wrap:wrap;gap:10px}[hidden]{display:none!important}@media(prefers-reduced-motion:reduce){body{transition:none}}
+</style>
+<script src="/site.js" defer></script>
+</head>
+<body>
+<header><small>FIELD NOTES</small><button id="theme" type="button" aria-pressed="false" hidden>Evening light</button></header>
+<main><h1>A little room<br>for quiet ideas.</h1><p>Observations on landscapes, materials and everyday design.</p>
+<nav id="filters" aria-label="Filter notes" hidden><button type="button" data-filter="all" aria-pressed="true">All notes</button><button type="button" data-filter="nature" aria-pressed="false">Nature</button><button type="button" data-filter="design" aria-pressed="false">Design</button></nav>
+<p id="count" role="status" hidden></p>
+<article data-topic="design"><small>MATERIALS</small><h2>Light and texture</h2><p>Natural light reveals the small details: the grain of a wooden surface, shadows across stone, and the gentle changes of the seasons.</p></article>
+<article data-topic="nature"><small>OUTDOORS</small><h2>The long way home</h2><p>A familiar path looks different after the rain. Leaves hold the light, the air feels clear, and there is a little more reason to walk slowly.</p></article>
+<article data-topic="design"><small>EVERYDAY OBJECTS</small><h2>Things worth keeping</h2><p>A useful object earns its place quietly. A good handle, a balanced shape, a surface that becomes more interesting with time.</p></article>
+</main><footer>A personal collection of notes. <span id="season"></span></footer>
+</body></html>

@@ -12,7 +12,7 @@ e=importlib.util.module_from_spec(spec);spec.loader.exec_module(e)
 
 def state():
     return dict(domain='1.2.3.4.cdn-one.org', reality_domain='1-2-3-4.cdn-one.org',panel_path='/admin123/',
-                ws_path='/ws123',xhttp_path='/xh123/',grpc_service='grpc123', sub_id='test',private_key='a'*43,
+                ws_path='/ws123',xhttp_path='/xh123/',grpc_service='grpc123', sub_ids={name: name+'-test' for name in e.CLIENT_NAMES},private_key='a'*43,
                 public_key='b'*43,short_id='abcdef0123456789',trojan_password='secret',hysteria_auth='auth',
                 uuids=dict(reality='a',ws='b',xhttp='c'))
 
@@ -86,3 +86,51 @@ class PayloadTests(unittest.TestCase):
         e.validate_links(base64.b64encode('\n'.join(urls).encode()),state())
 
 if __name__=='__main__':unittest.main()
+
+class MigrationTests(unittest.TestCase):
+    def legacy(self):
+        s=state()
+        rows=e.inbound_payloads(s)
+        for i,row in enumerate(rows):
+            row['id']=i+1
+            settings=json.loads(row['settings'])
+            settings['clients'][0].update(subId='legacy',totalGB=123456,expiryTime=1900000000000,comment='keep')
+            row['settings']=json.dumps(settings)
+        s.pop('sub_ids');s['sub_id']='legacy'
+        return s,rows
+
+    def test_split_preserves_clients_and_is_idempotent(self):
+        s,rows=self.legacy()
+        original=json.loads(json.dumps(rows))
+        class API:
+            def __init__(self): self.writes=0
+            def call(self,endpoint,data=None):
+                if endpoint=='inbounds/list': return rows
+                self.writes+=1
+                rows[int(endpoint.rsplit('/',1)[1])-1]=data
+        api=API()
+        with patch.object(e,'save'):
+            e.split_subscriptions(s,api,rows)
+            e.split_subscriptions(s,api,rows)
+        self.assertEqual(api.writes,5)
+        self.assertEqual(len(set(s['sub_ids'].values())),5)
+        for before,after in zip(original,rows):
+            old=json.loads(before['settings'])['clients'][0]
+            new=json.loads(after['settings'])['clients'][0]
+            old.pop('subId');new.pop('subId')
+            self.assertEqual(old,new)
+
+    def test_changed_client_refuses_before_first_write(self):
+        s,rows=self.legacy()
+        settings=json.loads(rows[-1]['settings']);settings['clients'][0]['subId']='custom'
+        rows[-1]['settings']=json.dumps(settings)
+        from unittest.mock import Mock
+        api=Mock()
+        with self.assertRaises(RuntimeError): e.split_subscriptions(s,api,rows)
+        api.call.assert_not_called()
+
+    def test_independent_subscription_rejects_combined_response(self):
+        body=b'vless://id@1.2.3.4.cdn-one.org:443?type=ws&security=tls'
+        e.validate_links(body,state(),'ws')
+        with self.assertRaises(RuntimeError): e.validate_links(body+b'\n'+body,state(),'ws')
+        with self.assertRaises(RuntimeError): e.validate_links(body,state(),'reality')
