@@ -347,7 +347,8 @@ def configure_amnezia(s, api):
         client = dict(email='single443-amneziawg', enable=True, subId=s['sub_ids'][name],
                       totalGB=0, expiryTime=0, limitIp=0)
         api.call('inbounds/add', dict(remark=label, enable=True, listen='0.0.0.0', port=51820,
-                 protocol='amneziawg', settings=json.dumps(dict(clients=[])),
+                 protocol='amneziawg', shareAddrStrategy='custom', shareAddr=s['domain'],
+                 settings=json.dumps(dict(clients=[])),
                  streamSettings='{}', sniffing='{}', allocate='{}', total=0, expiryTime=0))
         matches = [row for row in api.call('inbounds/list') if row.get('remark') == label]
         require(len(matches) == 1, 'AmneziaWG creation could not be verified')

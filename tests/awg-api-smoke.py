@@ -10,7 +10,7 @@ root=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('engine',root/'lib/engine.py')
 e=importlib.util.module_from_spec(spec);spec.loader.exec_module(e)
 s=dict(installed_version='v3.8.5',panel_path='/ci-test/',username='ci-user',password='ci-password-only',
-       country_code='US',domain='127.0.0.1',ip='127.0.0.1',sub_ids={},inbound_ids={})
+       country_code='US',domain='web.example.com',ip='127.0.0.1',sub_ids={},inbound_ids={})
 for attempt in range(30):
     try:
         api=e.API(s)
