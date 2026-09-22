@@ -37,9 +37,12 @@ with tempfile.TemporaryDirectory() as tmp:
     assert len(before)==len(after)==1
     assert json.loads(before[0]['settings'])==json.loads(after[0]['settings'])
     assert before[0]['id']==after[0]['id']
+    links=api.call('clients/links/single443-amneziawg')
+    assert isinstance(links,list) and len(links)==1
+    e.validate_links(links[0].encode(),s,'amneziawg')
     for attempt in range(20):
         text=e.subprocess.check_output(['ss','-H','-lnup','sport = :51820'],text=True)
         if 'x-ui' in text: break
         time.sleep(1)
     else: raise RuntimeError('Embedded AWG did not bind UDP/51820')
-print('PASS real upstream AmneziaWG creation, generated credentials, idempotence and UDP listener')
+print('PASS real upstream AmneziaWG creation, generated credentials, idempotence, client export and UDP listener')
