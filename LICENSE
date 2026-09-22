@@ -1,6 +1,9 @@
-LICENSE PLACEHOLDER — владелец репозитория должен выбрать лицензию перед распространением.
+License pending
 
-Этот каталог содержит самостоятельно подготовленную обвязку. Код upstream панели,
-Xray и mozaroc/x-ui-pro в поставку не включён. Загружаемые во время установки
-компоненты сохраняют собственные лицензии; см. соответствующие upstream repositories.
-Этот placeholder не является предоставлением лицензии на распространение.
+The repository owner must select a license before distribution.
+This placeholder does not grant a license to distribute LazyProxy.
+
+This repository contains independently developed deployment code.
+Upstream 3x-ui, Xray and mozaroc/x-ui-pro code is not included.
+Components downloaded during installation retain their respective licenses;
+see the corresponding upstream repositories.
