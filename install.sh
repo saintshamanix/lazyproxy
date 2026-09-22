@@ -46,7 +46,7 @@ fi
 export PANEL_VERSION AUTO_DOMAIN_SUFFIX=${AUTO_DOMAIN_SUFFIX:-cdn-one.org} PUBLIC_IPV4=${PUBLIC_IPV4:-}
 export ACME_EMAIL=${ACME_EMAIL:-} ACME_STAGING=${ACME_STAGING:-no}
 source /etc/os-release
-[[ $ID == ubuntu && ( $VERSION_ID == 22.04 || $VERSION_ID == 24.04 ) ]] || die 'Supported target: Ubuntu 22.04/24.04'
+[[ $ID == ubuntu && ( $VERSION_ID == 22.04 || $VERSION_ID == 24.04 || $VERSION_ID == 26.04 ) ]] || die 'Supported target: Ubuntu 22.04/24.04/26.04'
 mkdir -p "$STATE" /var/log/single443
 exec 9>/run/lock/single443.lock
 flock -n 9 || die 'Another installer/refresh is running'

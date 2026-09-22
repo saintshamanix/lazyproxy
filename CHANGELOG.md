@@ -1,3 +1,10 @@
+## 0.2.1
+
+- Разрешена Ubuntu 26.04 после CI на Ubuntu 26.04.1 amd64.
+- CI matrix: Ubuntu 24.04 и 26.04, установка полного набора зависимостей.
+- На 26.04 прошли 22 теста, Bash/ShellCheck, nginx -t, nftables namespace, реальный API/UDP/экспорт AmneziaWG upstream 3.8.5.
+- ACME на реальном домене, полная установка через systemd и внешние VPN handshakes остаются VPS acceptance tests; arm64 26.04 отдельно не проверена.
+
 ## 0.2.0
 
 - AmneziaWG как шестой управляемый inbound через API upstream 3x-ui 3.8.5.

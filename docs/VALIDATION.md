@@ -22,3 +22,15 @@
 Пустые routing placeholders нельзя описывать как проверенный профиль INCY или готовую routing-политику. `diagnose.sh` явно различает TCP/UDP listeners и полноценный protocol handshake. Секреты и тестовые сертификаты не включены в поставку.
 
 Firewall 0.1.1: Bash syntax и ShellCheck проверены локально. Linux nftables/systemd недоступны на Darwin; реальное применение и namespace-тест здесь не выполнялись. CI добавлен для проверки nft --check, повторного применения и точных наборов портов в отдельном network namespace.
+
+
+## Ubuntu 26.04 — 2026-09-22
+
+CI run: https://github.com/saintshamanix/lazyproxy/actions/runs/35711410182
+Both ubuntu-24.04 and ubuntu-26.04 jobs succeeded.
+Ubuntu 26.04.1 LTS amd64: Python 3.14.4, nginx 1.28.3, Certbot 4.0.0,
+nftables 1.1.6, systemd 259.5. All installer dependencies installed successfully.
+22 unit tests, Bash syntax, ShellCheck, isolated nftables policy/idempotence,
+real nginx config validation and real upstream 3.8.5 AmneziaWG API creation,
+key preservation on rerun, client export and UDP listener passed.
+This is not a full install.sh/systemd/ACME run, arm64 qualification or an external VPN handshake test.
