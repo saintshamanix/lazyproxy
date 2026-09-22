@@ -189,10 +189,15 @@ class NamingAndAmneziaTests(unittest.TestCase):
                 if endpoint=='inbounds/add':
                     self.adds+=1
                     settings=json.loads(data['settings'])
-                    self_payload=settings['clients'][0]
-                    self_payload.update(privateKey='private',publicKey='public',allowedIPs=['10.8.1.2/32'])
+                    self.assert_empty = settings['clients'] == []
                     settings['server']={'privateKey':'server-private'}
                     self.rows=[dict(data,id=6,settings=json.dumps(settings))]
+                elif endpoint=='clients/add':
+                    assert self.assert_empty and data['inboundIds']==[6]
+                    client=dict(data['client'],privateKey='private',publicKey='public',allowedIPs=['10.8.1.2/32'])
+                    settings=json.loads(self.rows[0]['settings'])
+                    settings['clients']=[client]
+                    self.rows[0]['settings']=json.dumps(settings)
                 else: raise AssertionError(endpoint)
         api=API()
         with patch.object(e,'save'),patch.object(e.subprocess,'check_output',return_value=''):
