@@ -1,3 +1,7 @@
+> **0.2.2:** входящие называются «флаг + протокол», клиенты — User1…User6. Обновление переименовывает штатных клиентов через API с сохранением subId, ключей и лимитов. При конфликте имён или ручном изменении идентичности обновление прекращается с rollback.
+>
+> AmneziaWG: upstream 3.8.5 экспортирует `vpn://` с Base64URL-конфигурацией. Это не доказательство поддержки импорта данного формата в Shadowrocket 2.2.92. Installer сохраняет исходный конфиг без потери параметров в `/etc/single443/User6-AmneziaWG.conf` (root-only); его можно забрать через SFTP для отдельного импорта в совместимый клиент. Публично файл не раздаётся. Поддержка AmneziaWG упоминается в [журнале Shadowrocket](https://apps.apple.com/us/app/shadowrocket/id932747118), но совместимость конкретных AWG 3.1 параметров и формата подписки требует проверки на устройстве.
+
 > **0.2.1:** Ubuntu 26.04 разрешена. На GitHub Actions Ubuntu 26.04.1 amd64 прошли установка зависимостей, Bash/ShellCheck, 22 unit tests, nginx -t, nftables и реальный API-тест AmneziaWG 3.8.5. Полная установка с ACME и клиентскими соединениями требует проверки на VPS.
 
 > **Версия 0.2.0:** шесть независимых входящих, включая AmneziaWG на UDP/51820.
@@ -185,12 +189,12 @@ Decoy содержит локальный `site.js`: переключение с
 
 | Входящий (флаг зависит от страны IP VPS) | Протокол | Внешний порт |
 |---|---|---|
-| 🌐 User1 — REALITY | VLESS TCP REALITY | TCP/443 |
-| 🌐 User2 — WS | VLESS WebSocket TLS | TCP/443 |
-| 🌐 User3 — XHTTP | VLESS XHTTP TLS, stream-up | TCP/443 |
-| 🌐 User4 — gRPC | Trojan gRPC TLS | TCP/443 |
-| 🌐 User5 — Hysteria2 | Hysteria2 | UDP/443 |
-| 🌐 User6 — AmneziaWG | AmneziaWG | UDP/51820 |
+| 🌐 REALITY | VLESS TCP REALITY | TCP/443 |
+| 🌐 WS | VLESS WebSocket TLS | TCP/443 |
+| 🌐 XHTTP | VLESS XHTTP TLS, stream-up | TCP/443 |
+| 🌐 gRPC | Trojan gRPC TLS | TCP/443 |
+| 🌐 Hysteria2 | Hysteria2 | UDP/443 |
+| 🌐 AmneziaWG | AmneziaWG | UDP/51820 |
 
 Страна определяется по публичному IPv4 через HTTPS API [IPWhois](https://ipwhois.io/documentation),
 поле `country_code`. Это геолокация IP, не подтверждение физического размещения сервера.

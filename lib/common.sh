@@ -26,7 +26,7 @@ backup_begin() {
   BACKUP_IN_PROGRESS=yes
   systemctl stop x-ui 2>/dev/null || true
   # SQLite and WAL are copied with the owning service stopped.
-  for path in /etc/nginx /etc/x-ui /usr/local/x-ui /etc/systemd/system/x-ui.service /var/www/single443 /etc/single443/access.txt /etc/single443/subscription.json /etc/single443/firewall.nft /etc/single443/firewall-expected.txt /etc/systemd/system/single443-firewall.service; do
+  for path in /etc/nginx /etc/x-ui /usr/local/x-ui /etc/systemd/system/x-ui.service /var/www/single443 /etc/single443/access.txt /etc/single443/User6-AmneziaWG.conf /etc/single443/subscription.json /etc/single443/firewall.nft /etc/single443/firewall-expected.txt /etc/systemd/system/single443-firewall.service; do
     if [[ -e $path ]]; then
       mkdir -p "$BACKUP/root$(dirname "$path")"
       cp -a "$path" "$BACKUP/root$path"
@@ -40,7 +40,7 @@ backup_begin() {
 rollback() {
   log "Rolling back panel/nginx from $BACKUP"
   systemctl stop x-ui nginx 2>/dev/null || true
-  for path in /etc/nginx /etc/x-ui /usr/local/x-ui /etc/systemd/system/x-ui.service /var/www/single443 /etc/single443/access.txt /etc/single443/subscription.json /etc/single443/firewall.nft /etc/single443/firewall-expected.txt /etc/systemd/system/single443-firewall.service; do
+  for path in /etc/nginx /etc/x-ui /usr/local/x-ui /etc/systemd/system/x-ui.service /var/www/single443 /etc/single443/access.txt /etc/single443/User6-AmneziaWG.conf /etc/single443/subscription.json /etc/single443/firewall.nft /etc/single443/firewall-expected.txt /etc/systemd/system/single443-firewall.service; do
     rm -rf -- "$path"
     if [[ -e $BACKUP/root$path ]]; then cp -a "$BACKUP/root$path" "$path"; fi
   done

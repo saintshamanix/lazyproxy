@@ -31,13 +31,31 @@ api.opener.open=inspected_open
 with tempfile.TemporaryDirectory() as tmp:
     e.STATE=Path(tmp)
     e.configure_amnezia(s,api)
+    row=api.call('inbounds/list')[0]
+    client=e.json_object(row['settings'])['clients'][0]
+    api.call('clients/update/User6',dict(client,email='single443-amneziawg'))
+    original_names=e.MANAGED_NAMES
+    # Keep stable User6 numbering while restricting migration to this CI inbound.
+    original_label=e.client_label
+    e.client_label=lambda name: 'User6'
+    e.MANAGED_NAMES=('amneziawg',)
+    e.rename_clients(s,api)
+    e.rename_clients(s,api)
+    e.MANAGED_NAMES=original_names
+    e.client_label=original_label
+    renamed=e.json_object(api.call('inbounds/list')[0]['settings'])['clients'][0]
+    for key in ('privateKey','publicKey','allowedIPs','subId'):
+        assert renamed[key]==client[key]
+    assert renamed['email']=='User6'
     before=api.call('inbounds/list')
     e.configure_amnezia(s,api)
     after=api.call('inbounds/list')
     assert len(before)==len(after)==1
     assert e.json_object(before[0]['settings'])==e.json_object(after[0]['settings'])
     assert before[0]['id']==after[0]['id']
-    links=api.call('clients/links/single443-amneziawg')
+    e.export_amnezia(s,api)
+    assert (e.STATE/'User6-AmneziaWG.conf').stat().st_mode & 0o777 == 0o600
+    links=api.call('clients/links/User6')
     assert isinstance(links,list) and len(links)==1
     e.validate_links(links[0].encode(),s,'amneziawg')
     for attempt in range(20):

@@ -229,11 +229,60 @@ def discover():
     return result
 
 def inbound_label(s, name):
-    number = MANAGED_NAMES.index(name) + 1
     code = s.get('country_code', '')
     flag = ''.join(chr(0x1F1E6 + ord(c) - ord('A')) for c in code) if re.fullmatch(r'[A-Z]{2}', code) else '🌐'
     protocol = {'reality':'REALITY', 'ws':'WS', 'xhttp':'XHTTP', 'grpc':'gRPC', 'hysteria':'Hysteria2', 'amneziawg':'AmneziaWG'}[name]
-    return f'{flag} User{number} — {protocol}'
+    return f'{flag} {protocol}'
+
+def client_label(name):
+    return 'User'+str(MANAGED_NAMES.index(name)+1)
+
+
+def rename_clients(s, api):
+    """Rename only installer identities through the native client API."""
+    rows = api.call('inbounds/list')
+    plans = []
+    for name in MANAGED_NAMES:
+        rows_for_id = [r for r in rows if r.get('id') == s['inbound_ids'].get(name)]
+        require(len(rows_for_id) == 1, 'Managed inbound missing during client rename')
+        row = rows_for_id[0]
+        clients = json_object(row['settings']).get('clients', [])
+        matches = [c for c in clients if c.get('subId') == s['sub_ids'][name]]
+        require(len(matches) == 1, 'Managed subscription identity is ambiguous')
+        client = matches[0]
+        target = client_label(name)
+        require(client.get('email') in (target, 'single443-'+name),
+                'Managed client was manually renamed; refusing overwrite')
+        if client['email'] == target:
+            continue
+        require(not any(c.get('email') == target for r in rows
+                        for c in json_object(r['settings']).get('clients', [])),
+                'Target client name already exists: '+target)
+        info = api.call('clients/get/'+urllib.parse.quote(client['email'], safe=''))
+        require(info.get('inboundIds') == [row['id']], 'Managed client has extra inbound attachments')
+        payload = dict(client, email=target, limitHwid=info['client'].get('limitHwid', 0))
+        plans.append((row['id'], client, payload))
+    for inbound_id, before, payload in plans:
+        api.call('clients/update/'+urllib.parse.quote(before['email'], safe=''), payload)
+        row = next(r for r in api.call('inbounds/list') if r['id'] == inbound_id)
+        matches = [c for c in json_object(row['settings'])['clients'] if c.get('email') == payload['email']]
+        require(len(matches) == 1, 'Client rename verification failed')
+        for key, value in before.items():
+            if key not in ('email', 'updated_at', 'updatedAt'):
+                require(matches[0].get(key) == value, 'Client rename changed '+key+'; rolling back')
+
+
+def export_amnezia(s, api):
+    links = api.call('clients/links/'+client_label('amneziawg'))
+    require(isinstance(links, list) and len(links) == 1 and links[0].startswith('vpn://'),
+            'Unexpected upstream AmneziaWG export')
+    validate_links(links[0].encode(), s, 'amneziawg')
+    encoded = links[0][6:]
+    conf = base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4))
+    target = STATE/'User6-AmneziaWG.conf'
+    target.write_bytes(conf)
+    target.chmod(0o600)
+
 
 def detect_country(s):
     if s.get('country_code'):
@@ -267,7 +316,7 @@ def inbound_payloads(s):
     result = []
     for name, port in [('reality',8443), ('ws',10001), ('xhttp',10002), ('grpc',10003), ('hysteria',443)]:
         protocol = 'hysteria' if name == 'hysteria' else 'trojan' if name == 'grpc' else 'vless'
-        client = dict(email='single443-'+name, enable=True, subId=s['sub_ids'][name], limitIp=0, totalGB=0, expiryTime=0, reset=0, tgId=0)
+        client = dict(email=client_label(name), enable=True, subId=s['sub_ids'][name], limitIp=0, totalGB=0, expiryTime=0, reset=0, tgId=0)
         if protocol == 'vless':
             client.update(id=s['uuids'][name], flow='xtls-rprx-vision' if name == 'reality' else '')
         elif protocol == 'trojan':
@@ -344,7 +393,7 @@ def configure_amnezia(s, api):
         s['sub_ids'].setdefault(name, secrets.token_hex(16))
         # The upstream API generates the server obfuscation, keypairs and tunnel
         # address. Do not invent parameters or install a competing AWG daemon.
-        client = dict(email='single443-amneziawg', enable=True, subId=s['sub_ids'][name],
+        client = dict(email=client_label(name), enable=True, subId=s['sub_ids'][name],
                       totalGB=0, expiryTime=0, limitIp=0)
         api.call('inbounds/add', dict(remark=label, enable=True, listen='0.0.0.0', port=51820,
                  protocol='amneziawg', shareAddrStrategy='custom', shareAddr=s['domain'],
@@ -359,7 +408,7 @@ def configure_amnezia(s, api):
     require(row.get('protocol') == name and row.get('port') == 51820 and row.get('enable') is True,
             'Managed AmneziaWG topology changed')
     data = json_object(row['settings'])
-    clients = [c for c in data.get('clients',[]) if c.get('email') == 'single443-amneziawg']
+    clients = [c for c in data.get('clients',[]) if c.get('email') in ('single443-amneziawg', client_label(name))]
     require(len(clients) == 1 and clients[0].get('subId') == s['sub_ids'].get(name),
             'Managed AmneziaWG subscription changed')
     require(all(clients[0].get(key) for key in ('privateKey','publicKey','allowedIPs'))
@@ -422,6 +471,8 @@ def inbounds():
         s['inbound_ids'][name] = created[0]['id']
     save(s)
     configure_amnezia(s, api)
+    rename_clients(s, api)
+    export_amnezia(s, api)
     settings = api.call('setting/all', {})
     routing_changes = dict(subIncyEnableRouting=True,
                            subIncyRoutingRules='https://'+s['domain']+'/routing/incy.json')
@@ -504,6 +555,7 @@ def render(templates):
         access += f'\n{name} subscription: https://{s["domain"]}{d["main_path"]}{sub_id}\n'
         if d['clash_path'] and name != 'amneziawg':
             access += f'{name} Mihomo: https://{s["domain"]}{d["clash_path"]}{sub_id}\n'
+    access += '\nAmneziaWG native config (private): /etc/single443/User6-AmneziaWG.conf\n'
     access += f'\nINCY routing: https://{s["domain"]}/routing/incy.json\n'
     (STATE/'access.txt').write_text(access)
     (STATE/'access.txt').chmod(0o600)

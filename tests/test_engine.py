@@ -94,7 +94,7 @@ class MigrationTests(unittest.TestCase):
             row['id']=i+1
             row['remark']='single443-'+e.CLIENT_NAMES[i]
             settings=json.loads(row['settings'])
-            settings['clients'][0].update(subId='legacy',totalGB=123456,expiryTime=1900000000000,comment='keep')
+            settings['clients'][0].update(email='single443-'+e.CLIENT_NAMES[i],subId='legacy',totalGB=123456,expiryTime=1900000000000,comment='keep')
             row['settings']=json.dumps(settings)
         s.pop('sub_ids');s['sub_id']='legacy'
         return s,rows
@@ -173,10 +173,40 @@ class NamingAndAmneziaTests(unittest.TestCase):
 
     def test_flags_and_stable_numbers(self):
         s=state();s['country_code']='US'
-        self.assertEqual(e.inbound_label(s,'reality'),'🇺🇸 User1 — REALITY')
-        self.assertEqual(e.inbound_label(s,'amneziawg'),'🇺🇸 User6 — AmneziaWG')
+        self.assertEqual(e.inbound_label(s,'reality'),'🇺🇸 REALITY')
+        self.assertEqual(e.inbound_label(s,'amneziawg'),'🇺🇸 AmneziaWG')
         s.pop('country_code')
-        self.assertEqual(e.inbound_label(s,'ws'),'🌐 User2 — WS')
+        self.assertEqual(e.inbound_label(s,'ws'),'🌐 WS')
+
+    def test_client_rename_preserves_fields_and_repeats(self):
+        s=state();s['inbound_ids']={name:i+1 for i,name in enumerate(e.CLIENT_NAMES)}
+        rows=e.inbound_payloads(s)
+        for i,row in enumerate(rows):
+            row['id']=i+1
+            data=json.loads(row['settings'])
+            data['clients'][0].update(email='single443-'+e.CLIENT_NAMES[i],comment='keep',totalGB=1234)
+            row['settings']=data
+        class API:
+            writes=0
+            def call(self,endpoint,data=None):
+                if endpoint=='inbounds/list': return rows
+                old=endpoint.rsplit('/',1)[1]
+                row=next(r for r in rows if r['settings']['clients'][0]['email']==old)
+                if endpoint.startswith('clients/get/'):
+                    return dict(inboundIds=[row['id']],client=dict(limitHwid=3))
+                self.writes+=1
+                assert data['limitHwid']==3
+                row['settings']['clients'][0]['email']=data['email']
+        api=API()
+        with patch.object(e,'MANAGED_NAMES',e.CLIENT_NAMES):
+            e.rename_clients(s,api)
+            e.rename_clients(s,api)
+        self.assertEqual(api.writes,5)
+        for i,row in enumerate(rows):
+            client=row['settings']['clients'][0]
+            self.assertEqual(client['email'],'User'+str(i+1))
+            self.assertEqual(client['totalGB'],1234)
+            self.assertEqual(client['subId'],s['sub_ids'][e.CLIENT_NAMES[i]])
 
     def test_country_lookup_and_outage(self):
         s=state();s['ip']='1.2.3.4'

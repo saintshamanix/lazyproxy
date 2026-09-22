@@ -1,3 +1,10 @@
+## 0.2.2
+
+- Separate inbound names (country flag + protocol) from client names (User1–User6).
+- Migrate managed client names via native API, preserving credentials/subIds/limits; reject collisions and extra attachments.
+- Export upstream AmneziaWG configuration to root-only User6-AmneziaWG.conf without rewriting protocol parameters; include it in rollback.
+- Exercise real API rename and export in Ubuntu 24.04/26.04 CI.
+
 ## 0.2.1
 
 - Разрешена Ubuntu 26.04 после CI на Ubuntu 26.04.1 amd64.
