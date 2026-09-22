@@ -1,6 +1,7 @@
 """Run against an isolated CI 3x-ui 3.8.5 instance, never a user panel."""
 import importlib.util
 import json
+import io
 from pathlib import Path
 import tempfile
 import time
@@ -18,6 +19,15 @@ for attempt in range(30):
         time.sleep(1)
 else:
     raise RuntimeError('CI panel did not start')
+original_open=api.opener.open
+def inspected_open(*args, **kwargs):
+    with original_open(*args, **kwargs) as response:
+        raw=response.read()
+    payload=json.loads(raw)
+    if payload.get('success') is False:
+        print('CI API rejection:', payload.get('msg',''))
+    return io.BytesIO(raw)
+api.opener.open=inspected_open
 with tempfile.TemporaryDirectory() as tmp:
     e.STATE=Path(tmp)
     e.configure_amnezia(s,api)
