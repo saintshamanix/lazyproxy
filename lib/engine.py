@@ -22,6 +22,7 @@ import uuid
 STATE = Path('/etc/single443')
 CERT = '/etc/letsencrypt/live/single443/'
 CLIENT_NAMES = ('reality', 'ws', 'xhttp', 'grpc', 'hysteria')
+MANAGED_NAMES = CLIENT_NAMES + ('amneziawg',)
 
 def require(ok, message):
     if not ok:
@@ -221,6 +222,29 @@ def discover():
     print('Subscription discovery OK ('+source+'); values kept in root-only state')
     return result
 
+def inbound_label(s, name):
+    number = MANAGED_NAMES.index(name) + 1
+    code = s.get('country_code', '')
+    flag = ''.join(chr(0x1F1E6 + ord(c) - ord('A')) for c in code) if re.fullmatch(r'[A-Z]{2}', code) else '🌐'
+    protocol = {'reality':'REALITY', 'ws':'WS', 'xhttp':'XHTTP', 'grpc':'gRPC', 'hysteria':'Hysteria2', 'amneziawg':'AmneziaWG'}[name]
+    return f'{flag} User{number} — {protocol}'
+
+def detect_country(s):
+    if s.get('country_code'):
+        return
+    try:
+        raw = subprocess.check_output(['curl','-fLsS','--max-time','10',
+            'https://ipwho.is/'+s['ip']+'?fields=success,ip,country_code'], text=True)
+        data = json.loads(raw)
+        require(data.get('success') is True and data.get('ip') == s['ip'], 'Geolocation lookup failed')
+        code = data.get('country_code', '')
+        require(re.fullmatch(r'[A-Z]{2}', code) and code != 'ZZ', 'Unknown country')
+        s['country_code'] = code
+        save(s)
+    except (RuntimeError, ValueError, subprocess.SubprocessError):
+        print('Country lookup unavailable; using neutral globe and retrying on next run')
+
+
 def inbound_payloads(s):
     tls = dict(serverName=s['domain'], minVersion='1.2', maxVersion='1.3', alpn=['h3'],
                certificates=[dict(certificateFile=CERT+'fullchain.pem', keyFile=CERT+'privkey.pem', usage='encipherment')],
@@ -251,9 +275,9 @@ def inbound_payloads(s):
             settings['version'] = 2
         stream = streams[name]
         stream['externalProxy'] = [dict(forceTls='same' if name in ('reality','hysteria') else 'tls',
-                                        dest=s['domain'], port=443, remark='single443-'+name,
+                                        dest=s['domain'], port=443, remark=inbound_label(s, name),
                                         sni=s['reality_domain'] if name == 'reality' else s['domain'])]
-        result.append(dict(remark='single443-'+name, enable=True, listen='0.0.0.0' if name=='hysteria' else '127.0.0.1',
+        result.append(dict(remark=inbound_label(s, name), enable=True, listen='0.0.0.0' if name=='hysteria' else '127.0.0.1',
                            port=port, protocol=protocol, settings=json.dumps(settings), streamSettings=json.dumps(stream),
                            sniffing=json.dumps(dict(enabled=False, destOverride=['http','tls','quic'])),
                            allocate=json.dumps(dict(strategy='always', refresh=5, concurrency=3)), total=0, expiryTime=0))
@@ -297,8 +321,48 @@ def split_subscriptions(s, api, rows):
     save(s)
 
 
+def configure_amnezia(s, api):
+    require(s.get('installed_version') == 'v3.8.5',
+            'AmneziaWG adapter verified against 3x-ui v3.8.5; pin --version 3.8.5')
+    name = 'amneziawg'
+    label = inbound_label(s, name)
+    rows = api.call('inbounds/list')
+    saved_id = s['inbound_ids'].get(name)
+    matches = [row for row in rows if (row.get('id') == saved_id if saved_id is not None
+               else row.get('remark') == label)]
+    require(len(matches) <= 1, 'Ambiguous AmneziaWG inbound')
+    if not matches:
+        require(not any(row.get('port') == 51820 for row in rows), 'UDP/51820 already assigned in panel')
+        occupied = subprocess.check_output(['ss','-H','-lnu','sport = :51820'], text=True)
+        require(not occupied.strip(), 'UDP/51820 already occupied')
+        s['sub_ids'].setdefault(name, secrets.token_hex(16))
+        # The upstream API generates the server obfuscation, keypairs and tunnel
+        # address. Do not invent parameters or install a competing AWG daemon.
+        client = dict(email='single443-amneziawg', enable=True, subId=s['sub_ids'][name],
+                      totalGB=0, expiryTime=0, limitIp=0)
+        api.call('inbounds/add', dict(remark=label, enable=True, listen='0.0.0.0', port=51820,
+                 protocol='amneziawg', settings=json.dumps(dict(clients=[client])),
+                 streamSettings='{}', sniffing='{}', allocate='{}', total=0, expiryTime=0))
+        matches = [row for row in api.call('inbounds/list') if row.get('remark') == label]
+        require(len(matches) == 1, 'AmneziaWG creation could not be verified')
+    row = matches[0]
+    require(row.get('protocol') == name and row.get('port') == 51820 and row.get('enable') is True,
+            'Managed AmneziaWG topology changed')
+    data = json.loads(row['settings'])
+    clients = [c for c in data.get('clients',[]) if c.get('email') == 'single443-amneziawg']
+    require(len(clients) == 1 and clients[0].get('subId') == s['sub_ids'].get(name),
+            'Managed AmneziaWG subscription changed')
+    require(all(clients[0].get(key) for key in ('privateKey','publicKey','allowedIPs'))
+            and data.get('server',{}).get('privateKey'), 'Upstream did not generate AWG keys/address')
+    s['inbound_ids'][name] = row['id']
+    if row['remark'] != label:
+        api.call('inbounds/update/'+str(row['id']), dict(row, remark=label))
+    save(s)
+
+
 def inbounds():
     s = load()
+    require(s.get('installed_version') == 'v3.8.5', 'Six-inbound adapter requires 3x-ui v3.8.5')
     api = API(s)
     if 'private_key' not in s:
         keys = api.call('server/getNewX25519Cert')
@@ -309,8 +373,13 @@ def inbounds():
     existing = api.call('inbounds/list')
     require(isinstance(existing, list), 'Unknown inbound list schema')
     split_subscriptions(s, api, existing)
-    for item in inbound_payloads(s):
-        matches = [x for x in existing if x.get('remark') == item['remark']]
+    existing = api.call('inbounds/list')  # Migration may have changed client subIds.
+    detect_country(s)
+    s.setdefault('inbound_ids', {})
+    for name, item in zip(CLIENT_NAMES, inbound_payloads(s)):
+        saved_id = s['inbound_ids'].get(name)
+        matches = [x for x in existing if (x.get('id') == saved_id if saved_id is not None
+                   else x.get('remark') in (item['remark'], 'single443-'+name))]
         require(len(matches) <= 1, 'Duplicate managed inbound; refusing ambiguous update')
         if matches:
             # Preserve users, counters and manual panel changes. Verify essential topology only.
@@ -327,9 +396,22 @@ def inbounds():
                     if block == 'realitySettings' and 'target' not in actual and 'dest' in actual:
                         actual = dict(actual, target=actual['dest'])
                     require(all(actual.get(k) == expected[block][k] for k in keys), 'Managed path/key/topology changed; existing clients preserved')
+            # Only display names change; stable IDs and credentials stay untouched.
+            s['inbound_ids'][name] = old['id']
+            desired_proxy = [dict(proxy, remark=item['remark']) for proxy in stream.get('externalProxy', expected['externalProxy'])]
+            if old['remark'] != item['remark'] or stream.get('externalProxy') != desired_proxy:
+                updated = dict(old, remark=item['remark'])
+                stream['externalProxy'] = desired_proxy
+                updated['streamSettings'] = json.dumps(stream)
+                api.call('inbounds/update/'+str(old['id']), updated)
             continue
         require(not any(x.get('port') == item['port'] for x in existing), 'Inbound port conflict')
         api.call('inbounds/add', item)
+        created = [row for row in api.call('inbounds/list') if row.get('remark') == item['remark']]
+        require(len(created) == 1, 'Created inbound not uniquely identified')
+        s['inbound_ids'][name] = created[0]['id']
+    save(s)
+    configure_amnezia(s, api)
     settings = api.call('setting/all', {})
     routing_changes = dict(subIncyEnableRouting=True,
                            subIncyRoutingRules='https://'+s['domain']+'/routing/incy.json')
@@ -410,7 +492,7 @@ def render(templates):
     access = f'Panel: https://{s["domain"]}{s["panel_path"]}\nUsername: {s["username"]}\nPassword: {s["password"]}\n'
     for name, sub_id in s['sub_ids'].items():
         access += f'\n{name} subscription: https://{s["domain"]}{d["main_path"]}{sub_id}\n'
-        if d['clash_path']:
+        if d['clash_path'] and name != 'amneziawg':
             access += f'{name} Mihomo: https://{s["domain"]}{d["clash_path"]}{sub_id}\n'
     access += f'\nINCY routing: https://{s["domain"]}/routing/incy.json\n'
     (STATE/'access.txt').write_text(access)
@@ -427,7 +509,7 @@ def curl_body(host, port, path, tls=True, address=None, user_agent='curl/single4
 
 def validate_links(body, s, name=None):
     text = body.decode().strip()
-    if not re.search(r'(?:vless|trojan|hy2|hysteria2)://', text):
+    if not re.search(r'(?:vless|trojan|hy2|hysteria2|vpn)://', text):
         try:
             text = base64.b64decode(text+'='*(-len(text)%4),validate=True).decode()
         except (ValueError, UnicodeError):
@@ -441,12 +523,22 @@ def validate_links(body, s, name=None):
         # including before base64 encoding. They are not proxy connections.
         if line.startswith(('incy://autorouting/onadd/', 'incy://routing/onadd/')):
             continue
-        require(urllib.parse.urlsplit(line).scheme in ('vless','trojan','hy2','hysteria2'),
+        require(urllib.parse.urlsplit(line).scheme in ('vless','trojan','hy2','hysteria2','vpn'),
                 'Unexpected subscription entry type')
         urls.append(line)
     expected_count = 1 if name else 5
     require(len(urls) == expected_count,
             f'Unexpected subscription client count: expected {expected_count}, got {len(urls)}')
+    if name == 'amneziawg':
+        require(urls[0].startswith('vpn://'), 'AmneziaWG vpn export missing')
+        encoded = urls[0][6:]
+        config = base64.b64decode(encoded+'='*(-len(encoded)%4), altchars=b'-_', validate=True).decode()
+        require('[Interface]' in config and '[Peer]' in config and 'PrivateKey = ' in config,
+                'Incomplete AmneziaWG client export')
+        endpoints = re.findall(r'^Endpoint\s*=\s*(.+)$', config, re.M)
+        require(len(endpoints) == 1 and endpoints[0].strip() in
+                (s['domain']+':51820', s['ip']+':51820'), 'Incorrect AmneziaWG endpoint')
+        return
     managed = []
     for url in urls:
         u = urllib.parse.urlsplit(url)
@@ -491,6 +583,14 @@ def diagnose():
         text=subprocess.check_output(['ss','-H','-lunp','sport = :443'],text=True)
         require('xray' in text.lower(), 'Xray is not listening on UDP/443')
     check('Hysteria2 UDP listener (not a protocol handshake)',udp)
+    def awg_udp():
+        for _ in range(15):
+            text = subprocess.check_output(['ss','-H','-lnup','sport = :51820'], text=True)
+            if 'x-ui' in text:
+                return
+            time.sleep(1)
+        raise RuntimeError('Panel AmneziaWG UDP/51820 listener absent')
+    check('AmneziaWG UDP/51820 listener (not a protocol handshake)', awg_udp)
     check('decoy via local SNI dispatcher',lambda: require(b'Field Notes' in curl_body(s['domain'],443,'/',address='127.0.0.1'),'Unexpected decoy'))
     check('REALITY unauthenticated TLS fallback',lambda: require(b'Field Notes' in curl_body(s['reality_domain'],443,'/',address='127.0.0.1'),'Unexpected fallback'))
     check('public decoy URL from VPS',lambda: require(b'Field Notes' in curl_body(s['domain'],443,'/'),'Unexpected decoy'))
@@ -500,7 +600,7 @@ def diagnose():
         for name, sub_id in s['sub_ids'].items():
             check(name+' subscription backend with Host/SNI',lambda name=name, sub_id=sub_id: validate_links(curl_body(d['host'],d['port'],d['main_path']+sub_id,d['tls'],d['address'],'v2rayN/7.0'),s,name))
             check(name+' public subscription: exactly one client',lambda name=name, sub_id=sub_id: validate_links(curl_body(s['domain'],443,d['main_path']+sub_id,user_agent='v2rayN/7.0'),s,name))
-            if d['clash_path']:
+            if d['clash_path'] and name != 'amneziawg':
                 check(name+' public Mihomo subscription',lambda sub_id=sub_id: require(b'proxies:' in curl_body(s['domain'],443,d['clash_path']+sub_id,user_agent='mihomo/1.19'),'Unexpected Mihomo body'))
     except Exception as e:
         failures.append('discovery')

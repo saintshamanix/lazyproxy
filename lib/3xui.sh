@@ -10,7 +10,7 @@ resolve_release() {
     curl -fLsS --retry 3 "https://api.github.com/repos/MHSanaei/3x-ui/releases/tags/$PANEL_VERSION" -o "$STATE/release.json"
   fi
   TAG=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["tag_name"])' "$STATE/release.json")
-  [[ $TAG =~ ^v3\.(7|8)\.[0-9]+$ ]] || die "No verified adapter for $TAG; supported source families 3.7.x/3.8.x"
+  [[ $TAG == v3.8.5 ]] || die "Six-inbound AmneziaWG adapter verified for v3.8.5; pin --version 3.8.5 (requested $TAG)"
   export TAG ARCH
   log "Resolved upstream release $TAG ($ARCH)"
 }

@@ -10,7 +10,7 @@ add table inet single443
         # ICMP has no TCP/UDP ports; required for errors, PMTU and IPv6 ND.
         meta l4proto { icmp, ipv6-icmp } accept
         tcp dport { 22, 80, 443 } ct state new accept
-        udp dport 443 ct state new accept
+        udp dport { 443, 51820 } ct state new accept
     }
     chain forward {
         type filter hook forward priority 10; policy drop;

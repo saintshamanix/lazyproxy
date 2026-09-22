@@ -27,6 +27,6 @@ for x in items:
         if payload.get('field')=='dport':
             right=match['right']
             ports[payload['protocol']]=set(right['set'] if isinstance(right,dict) else [right])
-assert ports=={'tcp':{22,80,443},'udp':{443}},ports
+assert ports=={'tcp':{22,80,443},'udp':{443,51820}},ports
 print('PASS: nft syntax, atomic repeated apply, policies and exact allowed port sets')
 PY

@@ -92,6 +92,7 @@ class MigrationTests(unittest.TestCase):
         rows=e.inbound_payloads(s)
         for i,row in enumerate(rows):
             row['id']=i+1
+            row['remark']='single443-'+e.CLIENT_NAMES[i]
             settings=json.loads(row['settings'])
             settings['clients'][0].update(subId='legacy',totalGB=123456,expiryTime=1900000000000,comment='keep')
             row['settings']=json.dumps(settings)
@@ -159,5 +160,58 @@ class IncySubscriptionTests(unittest.TestCase):
         for body in (route, base64.b64encode(route),
                      b'vless://id@1.2.3.4.cdn-one.org:443?type=ws&security=tls\nhttps://example.com/unknown'):
             with self.assertRaises(RuntimeError): e.validate_links(body,state(),'ws')
+
+
+class NamingAndAmneziaTests(unittest.TestCase):
+    def test_flags_and_stable_numbers(self):
+        s=state();s['country_code']='US'
+        self.assertEqual(e.inbound_label(s,'reality'),'🇺🇸 User1 — REALITY')
+        self.assertEqual(e.inbound_label(s,'amneziawg'),'🇺🇸 User6 — AmneziaWG')
+        s.pop('country_code')
+        self.assertEqual(e.inbound_label(s,'ws'),'🌐 User2 — WS')
+
+    def test_country_lookup_and_outage(self):
+        s=state();s['ip']='1.2.3.4'
+        with patch.object(e.subprocess,'check_output',return_value='{"success":true,"ip":"1.2.3.4","country_code":"DE"}'), patch.object(e,'save'):
+            e.detect_country(s)
+        self.assertEqual(s['country_code'],'DE')
+        s.pop('country_code')
+        with patch.object(e.subprocess,'check_output',return_value='{"success":false}'), patch.object(e,'save'):
+            e.detect_country(s)
+        self.assertNotIn('country_code',s)
+
+    def test_awg_api_creation_and_repeat_preserves_keys(self):
+        s=state();s.update(installed_version='v3.8.5',inbound_ids={})
+        class API:
+            def __init__(self): self.rows=[];self.adds=0
+            def call(self,endpoint,data=None):
+                if endpoint=='inbounds/list': return self.rows
+                if endpoint=='inbounds/add':
+                    self.adds+=1
+                    settings=json.loads(data['settings'])
+                    self_payload=settings['clients'][0]
+                    self_payload.update(privateKey='private',publicKey='public',allowedIPs=['10.8.1.2/32'])
+                    settings['server']={'privateKey':'server-private'}
+                    self.rows=[dict(data,id=6,settings=json.dumps(settings))]
+                else: raise AssertionError(endpoint)
+        api=API()
+        with patch.object(e,'save'),patch.object(e.subprocess,'check_output',return_value=''):
+            e.configure_amnezia(s,api)
+            before=json.loads(json.dumps(api.rows))
+            e.configure_amnezia(s,api)
+        self.assertEqual(api.adds,1);self.assertEqual(api.rows,before)
+        self.assertEqual(s['inbound_ids']['amneziawg'],6)
+        self.assertEqual(len(set(s['sub_ids'].values())),6)
+
+    def test_awg_export_checks_endpoint(self):
+        s=state();s['ip']='1.2.3.4'
+        for port in (51820,443):
+            conf=f'[Interface]\nPrivateKey = secret\n[Peer]\nEndpoint = {s["domain"]}:{port}\n'
+            link=b'vpn://'+base64.urlsafe_b64encode(conf.encode()).rstrip(b'=')
+            if port==51820:
+                e.validate_links(link,s,'amneziawg')
+                e.validate_links(base64.b64encode(link),s,'amneziawg')
+            else:
+                with self.assertRaises(RuntimeError): e.validate_links(link,s,'amneziawg')
 
 if __name__=='__main__':unittest.main()

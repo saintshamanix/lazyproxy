@@ -5,6 +5,7 @@ umask 077
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "$ROOT/lib/common.sh"
 source "$ROOT/lib/nginx.sh"
+source "$ROOT/lib/firewall.sh"
 [[ $EUID == 0 ]] || die 'Run as root'
 [[ -f $STATE/state.json ]] || die 'No managed installation found'
 exec 9>/run/lock/single443.lock
@@ -12,11 +13,14 @@ flock -n 9 || die 'Installer/refresh is running'
 mkdir -p /var/log/single443
 exec > >(tee -a /var/log/single443/install.log) 2>&1
 version=$(helper value installed_version)
-[[ $version =~ ^v?3\.(7|8)\.[0-9]+$ ]] || die 'Unsupported installed panel version'
+[[ $version == v3.8.5 ]] || die 'AmneziaWG update requires installed v3.8.5; use full install --version 3.8.5'
 helper discover
+firewall_preflight
 trap 'on_error "$?" "$LINENO"' ERR
 trap 'on_error 130 "$LINENO"' INT TERM
 backup_begin
+configure_firewall
+nft -s list table inet single443 > /etc/single443/firewall-expected.txt
 systemctl start x-ui
 helper wait-panel
 helper inbounds
@@ -28,5 +32,5 @@ mkdir -p /opt/single443
 if [[ $(realpath "$ROOT") != /opt/single443 ]]; then cp -a "$ROOT/." /opt/single443/; fi
 TX_ACTIVE=no
 trap - ERR INT TERM
-log "Updated. Import the five independent subscriptions from $STATE/access.txt"
+log "Updated. Import the six independent subscriptions from $STATE/access.txt"
 log "Backup: $BACKUP"
