@@ -1,3 +1,5 @@
+> **0.2.4:** subscription title is `Casper area`, configured through the upstream API for both fresh installs and updates. Clients receive the upstream `Profile-Title` header. Existing app profiles may need a subscription refresh or reimport.
+
 > **0.2.3:** automatic kernel TCP BBR + default fq when supported; unavailable BBR is explicitly skipped. Existing interface qdiscs are preserved. Fail2ban and the `3x-ipl` jail are installed automatically, with nftables actions for TCP/443 and UDP/443,51820. New clients remain unlimited (`limitIp=0`); existing manual limits are preserved. Enforcing IP limits behind nginx still requires real-IP forwarding. Kernel TCP BBR does not configure Hysteria2/AmneziaWG UDP congestion control.
 
 > **0.2.2:** входящие называются «флаг + протокол», клиенты — User1…User6. Обновление переименовывает штатных клиентов через API с сохранением subId, ключей и лимитов. При конфликте имён или ручном изменении идентичности обновление прекращается с rollback.

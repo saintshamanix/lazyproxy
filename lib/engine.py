@@ -474,6 +474,10 @@ def inbounds():
     rename_clients(s, api)
     export_amnezia(s, api)
     settings = api.call('setting/all', {})
+    require('subTitle' in settings, 'Upstream subscription title setting unavailable')
+    if settings['subTitle'] != 'Casper area':
+        settings['subTitle'] = 'Casper area'
+        api.call('setting/update', settings)
     routing_changes = dict(subIncyEnableRouting=True,
                            subIncyRoutingRules='https://'+s['domain']+'/routing/incy.json')
     if set(routing_changes) <= set(settings):

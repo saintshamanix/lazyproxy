@@ -1,3 +1,7 @@
+## 0.2.4
+
+- Set the upstream subscription title to Casper area during installation and updates; preserve inbound and client names.
+
 ## 0.2.3
 
 - Automatic supported kernel TCP BBR and persistent default fq, with rollback.
