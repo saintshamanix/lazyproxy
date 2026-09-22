@@ -1,0 +1,21 @@
+# Atomic replacement of this installer's table only (IPv4 + IPv6).
+add table inet single443
+ delete table inet single443
+ table inet single443 {
+    chain input {
+        type filter hook input priority 10; policy drop;
+        iifname "lo" accept
+        ct state invalid drop
+        ct state established,related accept
+        # ICMP has no TCP/UDP ports; required for errors, PMTU and IPv6 ND.
+        meta l4proto { icmp, ipv6-icmp } accept
+        tcp dport { 22, 80, 443 } ct state new accept
+        udp dport 443 ct state new accept
+    }
+    chain forward {
+        type filter hook forward priority 10; policy drop;
+    }
+    chain output {
+        type filter hook output priority 10; policy accept;
+    }
+}

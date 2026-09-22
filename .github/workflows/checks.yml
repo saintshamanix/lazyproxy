@@ -1,0 +1,27 @@
+name: Static and nginx checks
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -q && sudo apt-get install -y shellcheck nginx libnginx-mod-stream nftables
+      - run: find . -name '*.sh' -exec bash -n {} \;
+      - run: shellcheck -S warning -e SC1090,SC1091,SC2034 $(find . -name '*.sh')
+      - run: python3 -m unittest discover -s tests -v
+      - run: sudo unshare --net bash tests/firewall-netns.sh
+      - name: Render and validate actual nginx configuration
+        shell: bash
+        run: |
+          mkdir -p /tmp/single443-test
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=web.example.com -keyout /tmp/single443-test/privkey.pem -out /tmp/single443-test/fullchain.pem
+          python3 tests/render_fixtures.py /tmp/single443-test AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+          cat > /tmp/single443-test/nginx.conf <<'EOF'
+          include /etc/nginx/modules-enabled/*.conf;
+          pid /tmp/single443-test/nginx.pid;
+          error_log /tmp/single443-test/error.log;
+          events {}
+          http { include /tmp/single443-test/web.conf; }
+          include /tmp/single443-test/stream.conf;
+          EOF
+          sudo nginx -t -c /tmp/single443-test/nginx.conf
