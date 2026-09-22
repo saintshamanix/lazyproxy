@@ -6,6 +6,8 @@ ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "$ROOT/lib/common.sh"
 source "$ROOT/lib/nginx.sh"
 source "$ROOT/lib/firewall.sh"
+source "$ROOT/lib/tuning.sh"
+source "$ROOT/lib/iplimit.sh"
 [[ $EUID == 0 ]] || die 'Run as root'
 [[ -f $STATE/state.json ]] || die 'No managed installation found'
 exec 9>/run/lock/single443.lock
@@ -18,7 +20,11 @@ helper discover
 firewall_preflight
 trap 'on_error "$?" "$LINENO"' ERR
 trap 'on_error 130 "$LINENO"' INT TERM
+DEBIAN_FRONTEND=noninteractive apt-get update -q
+DEBIAN_FRONTEND=noninteractive apt-get install -y kmod fail2ban python3-systemd
 backup_begin
+configure_bbr
+configure_iplimit
 configure_firewall
 nft -s list table inet single443 > /etc/single443/firewall-expected.txt
 systemctl start x-ui

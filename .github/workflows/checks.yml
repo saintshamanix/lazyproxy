@@ -9,7 +9,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update -q && sudo apt-get install -y shellcheck curl ca-certificates python3 openssl nginx libnginx-mod-stream certbot dnsutils iproute2 util-linux nftables
+      - run: sudo apt-get update -q && sudo apt-get install -y shellcheck curl ca-certificates python3 openssl nginx libnginx-mod-stream certbot dnsutils iproute2 util-linux nftables kmod fail2ban python3-systemd
       - name: Record target and dependency versions
         run: |
           cat /etc/os-release
@@ -55,3 +55,6 @@ jobs:
           trap 'sudo kill "$panel_pid" 2>/dev/null || true' EXIT
           cd "$GITHUB_WORKSPACE"
           sudo python3 tests/awg-api-smoke.py
+      - name: BBR and fail2ban setup with real nftables actions
+        shell: bash
+        run: sudo bash tests/tuning-smoke.sh

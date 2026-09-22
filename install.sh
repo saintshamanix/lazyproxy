@@ -26,7 +26,7 @@ if [[ ${1:-} == --update-only ]]; then
 fi
 # shellcheck source=lib/common.sh
 source "$ROOT/lib/common.sh"
-for module in 3xui certs subscription inbounds nginx firewall; do source "$ROOT/lib/$module.sh"; done
+for module in 3xui certs subscription inbounds nginx firewall tuning iplimit; do source "$ROOT/lib/$module.sh"; done
 PANEL_VERSION=latest
 CONFIG=''
 while (($#)); do
@@ -54,7 +54,7 @@ exec > >(tee -a /var/log/single443/install.log) 2>&1
 log 'Preparing dependencies'
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-apt-get install -y -q curl ca-certificates python3 openssl nginx libnginx-mod-stream certbot dnsutils iproute2 util-linux nftables
+apt-get install -y -q curl ca-certificates python3 openssl nginx libnginx-mod-stream certbot dnsutils iproute2 util-linux nftables kmod fail2ban python3-systemd
 preflight
 firewall_preflight
 resolve_release
@@ -62,6 +62,8 @@ init_state
 trap 'on_error "$?" "$LINENO"' ERR
 trap 'on_error 130 "$LINENO"' INT TERM
 backup_begin
+configure_bbr
+configure_iplimit
 configure_firewall
 nft -s list table inet single443 > /etc/single443/firewall-expected.txt
 install_acme_web

@@ -1,3 +1,10 @@
+## 0.2.3
+
+- Automatic supported kernel TCP BBR and persistent default fq, with rollback.
+- Automatic fail2ban 3x-ipl jail and separate TCP/UDP nftables actions; no SSH bans from this jail.
+- Client IP limits remain unlimited by default; diagnostics document nginx real-IP prerequisite.
+- CI exercises jail startup, repeated configuration and synthetic nftables ban/unban.
+
 ## 0.2.2
 
 - Separate inbound names (country flag + protocol) from client names (User1–User6).
