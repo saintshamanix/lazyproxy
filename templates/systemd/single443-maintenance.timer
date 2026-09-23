@@ -1,0 +1,11 @@
+[Unit]
+Description=Check whether 72-hour single443 maintenance is due
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+AccuracySec=1min
+Unit=single443-maintenance.service
+
+[Install]
+WantedBy=timers.target

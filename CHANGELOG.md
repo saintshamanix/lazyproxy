@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.5
+
+- Add persistent systemd maintenance, gated by 72 hours since the last successful run.
+- Truncate active nginx logs, rotate/vacuum archived journal files and clean APT cache. Package autoremove/purge is opt-in.
+- Preserve nginx archives and configured autoremove preference. Add shared locking, bounded APT lock wait, retry on failure and timer/config rollback.
+- Test due/not-due behavior, opt-in package removal, failure handling and repeated systemd timer installation.
+
 ## 0.2.4
 
 - Set the subscription title to `Casper area` through the upstream API on install and update; preserve inbound and client names.

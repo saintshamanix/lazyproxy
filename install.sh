@@ -26,7 +26,7 @@ if [[ ${1:-} == --update-only ]]; then
 fi
 # shellcheck source=lib/common.sh
 source "$ROOT/lib/common.sh"
-for module in 3xui certs subscription inbounds nginx firewall tuning iplimit; do source "$ROOT/lib/$module.sh"; done
+for module in 3xui certs subscription inbounds nginx firewall tuning iplimit maintenance; do source "$ROOT/lib/$module.sh"; done
 PANEL_VERSION=latest
 CONFIG=''
 while (($#)); do
@@ -80,6 +80,7 @@ if ! bash "$ROOT/diagnose.sh"; then die 'Post-install verification failed'; fi
 mkdir -p /opt/single443
 if [[ $(realpath "$ROOT") != /opt/single443 ]]; then cp -a "$ROOT/." /opt/single443/; fi
 install_renew_hook
+install_maintenance
 TX_ACTIVE=no
 trap - ERR INT TERM
 log "Completed. Credentials and subscription URLs: $STATE/access.txt (root only)"

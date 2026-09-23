@@ -40,3 +40,16 @@ bash <(curl -fsSL "https://raw.githubusercontent.com/$INSTALLER_REPO/$INSTALLER_
 ## License
 
 Not yet specified; see [LICENSE](LICENSE). Upstream components retain their own licenses.
+
+## Automatic maintenance
+
+Installation and updates enable a persistent systemd timer. It checks hourly and runs cleanup after 72 hours since the last successful run; the first cleanup is due three days after installation. Missed cleanup is picked up after boot. Installation and cleanup share a lock.
+
+Cleanup truncates only nginx `access.log` and `error.log` (archives are preserved), rotates the journal and vacuums archived entries with `--vacuum-time=1d --vacuum-size=10M`, then runs `apt-get clean`. Active journal files may keep total disk usage above 10M. This does not impose a continuous disk-usage cap between runs.
+
+Package removal is opt-in: set `AUTO_REMOVE=yes` in `/etc/single443/maintenance.env` to additionally run `apt-get autoremove --purge -y`. Reruns preserve this setting. Failures leave the success timestamp unchanged and retry on the next hourly tick; partial cleanup cannot be undone.
+
+- Status: `systemctl list-timers single443-maintenance.timer`
+- Logs: `journalctl -u single443-maintenance.service`
+- Run now: `sudo /usr/local/libexec/single443-maintenance --force`
+- Disable: `sudo systemctl disable --now single443-maintenance.timer` (installer reruns enable it again).

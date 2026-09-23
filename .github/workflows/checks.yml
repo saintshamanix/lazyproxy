@@ -58,3 +58,7 @@ jobs:
       - name: BBR and fail2ban setup with real nftables actions
         shell: bash
         run: sudo bash tests/tuning-smoke.sh
+      - name: Install and verify maintenance timer without running cleanup
+        shell: bash
+        run: |
+          sudo bash -c 'set -Eeuo pipefail; ROOT="$PWD"; source lib/common.sh; source lib/maintenance.sh; mkdir -p /etc/single443; install_maintenance; install_maintenance; systemctl is-enabled single443-maintenance.timer; systemctl is-active single443-maintenance.timer'
