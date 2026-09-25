@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.9
+
+- Add custom WEB/REALITY domain pairs via --domain/--reality-domain or WEB_DOMAIN/REALITY_DOMAIN config.
+- Validate distinct DNS names and existing DNS requirements before ACME; certificates cover both names.
+- Preserve saved custom domains on reruns; reject changes to either saved domain or IP.
+- Keep automatic domains as the fresh-install default; document both modes in English and Russian.
+
 ## 0.2.8
 
 - Preserve custom client names on updates; use saved inbound IDs and subIds to resolve managed identities.

@@ -89,6 +89,38 @@ sudo cat /etc/single443/access.txt
 
 This file contains secret credentials. Do not publish it.
 
+## Using your own domains
+
+Provide two distinct DNS names; a domain and a subdomain, or two subdomains, work equally well:
+
+| Setting | Example | Purpose |
+|---|---|---|
+| `WEB_DOMAIN` / `--domain` | `vpn.example.com` | Website, panel, subscriptions, WS, XHTTP, gRPC, Hysteria2 and AWG endpoint |
+| `REALITY_DOMAIN` / `--reality-domain` | `reality.example.com` | REALITY SNI and TLS fallback |
+
+Create an **A record for each name pointing directly to the VPS IPv4**.
+Disable CDN proxying (for example, use DNS-only records in Cloudflare).
+This IPv4-only adapter rejects AAAA/CNAME answers; use direct A records.
+Open TCP/80 for Let's Encrypt HTTP-01 and renewal. Certbot requests one certificate
+covering both names. Supply names only, without `https://`, ports or paths.
+For internationalized names, use their ASCII/Punycode form.
+
+For a fresh installation, replace the two example names:
+
+```bash
+sudo bash -c 'set -Eeuo pipefail; export INSTALLER_REPO=saintshamanix/lazyproxy INSTALLER_REF=main; f=$(mktemp); trap '\''rm -f "$f"'\'' EXIT; curl -fLsS --retry 3 "https://raw.githubusercontent.com/$INSTALLER_REPO/$INSTALLER_REF/install.sh" -o "$f"; bash "$f" --version 3.8.5 --domain vpn.example.com --reality-domain reality.example.com'
+```
+
+Alternatively, set both variables in a root-owned config file and pass
+`--config /root/lazyproxy.env`. Config values override corresponding CLI options.
+Both names must be provided together. If neither is provided on a fresh VPS,
+the existing automatic-domain behavior applies.
+
+Reruns with no domain options preserve the saved names, including custom domains.
+Changing an existing installation's IP or either domain is deliberately refused:
+migrating certificates, links and client profiles requires a separate procedure.
+`--update-only` uses the saved domains and does not accept domain options.
+
 ## Updating an existing installation
 
 Update the installer-managed components without upgrading the panel version:

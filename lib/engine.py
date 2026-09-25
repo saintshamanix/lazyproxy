@@ -59,6 +59,35 @@ def path_value(value):
     require(isinstance(value, str) and re.fullmatch(r'/(?:[A-Za-z0-9_-]+/)+', value), 'Unsupported or unsafe subscription path; nginx unchanged')
     return value
 
+def installation_domains(ip, saved=None):
+    web = os.environ.get('WEB_DOMAIN', '')
+    reality = os.environ.get('REALITY_DOMAIN', '')
+    require(bool(web) == bool(reality),
+            'Set both WEB_DOMAIN and REALITY_DOMAIN, or leave both empty')
+    if web:
+        names = []
+        for value in (web, reality):
+            value = domain(value.lower())
+            require('.' in value and not value.endswith('.'), 'Use a fully qualified DNS name')
+            try:
+                ipaddress.ip_address(value)
+            except ValueError:
+                pass
+            else:
+                raise RuntimeError('Use DNS names, not IP literals')
+            names.append(value)
+        require(names[0] != names[1], 'WEB and REALITY domains must differ for SNI routing')
+    elif saved:
+        names = [saved['domain'], saved['reality_domain']]
+    else:
+        suffix = domain(os.environ.get('AUTO_DOMAIN_SUFFIX', 'cdn-one.org'))
+        names = [domain(ip + '.' + suffix), domain(ip.replace('.', '-') + '.' + suffix)]
+    if saved:
+        require(saved['ip'] == ip and names == [saved['domain'], saved['reality_domain']],
+                'IP/domain changed; automatic migration is intentionally refused')
+    return names
+
+
 def init():
     ip = os.environ.get('PUBLIC_IPV4', '')
     if not ip:
@@ -68,17 +97,15 @@ def init():
         require(len(set(probes)) == 1, 'IPv4 discovery sources disagree; set PUBLIC_IPV4 explicitly')
         ip = probes[0]
     require(ipaddress.IPv4Address(ip).is_global, 'A globally routable IPv4 is required')
-    suffix = domain(os.environ['AUTO_DOMAIN_SUFFIX'])
-    names = [domain(ip + '.' + suffix), domain(ip.replace('.', '-') + '.' + suffix)]
+    saved = load() if (STATE / 'state.json').exists() else None
+    names = installation_domains(ip, saved)
     for name in names:
         addresses = {x[4][0] for x in socket.getaddrinfo(name, None, socket.AF_INET)}
         require(addresses == {ip}, f'DNS A for {name} does not exclusively resolve to this VPS')
         # AAAA pointing elsewhere breaks ACME HTTP-01 validation.
         aaaa = subprocess.check_output(['dig', '+short', 'AAAA', name], text=True).strip()
         require(not aaaa, f'{name} has AAAA/CNAME records; this IPv4-only adapter requires unambiguous DNS')
-    if (STATE / 'state.json').exists():
-        s = load()
-        require(s['ip'] == ip and s['domain'] == names[0], 'IP/domain changed; automatic migration is intentionally refused')
+    if saved:
         return
     s = dict(ip=ip, domain=names[0], reality_domain=names[1], username='admin_' + secrets.token_hex(5),
              password=secrets.token_urlsafe(32), sub_ids={name: secrets.token_hex(16) for name in CLIENT_NAMES}, configured=False,

@@ -20,6 +20,54 @@ def settings():
     return dict(subEnable=True,subListen='127.0.0.1',subPort=32123,subPath='/random123/',subDomain='sub.example.com',
                 subCertFile='',subKeyFile='',subJsonEnable=True,subJsonPath='/json123/',subClashEnable=True,subClashPath='/clash123/')
 
+class DomainSelectionTests(unittest.TestCase):
+    def select(self, env, saved=None):
+        with patch.dict(e.os.environ, env, clear=True):
+            return e.installation_domains('8.8.8.8', saved)
+
+    def test_auto_and_custom(self):
+        self.assertEqual(self.select({}), ['8.8.8.8.cdn-one.org','8-8-8-8.cdn-one.org'])
+        self.assertEqual(self.select(dict(WEB_DOMAIN='VPN.Example.com', REALITY_DOMAIN='reality.example.com')),
+                         ['vpn.example.com','reality.example.com'])
+
+    def test_incomplete_colliding_and_unsafe_names(self):
+        cases=[dict(WEB_DOMAIN='vpn.example.com'),dict(REALITY_DOMAIN='r.example.com')]
+        for bad in ('https://vpn.example.com','*.example.com','localhost','8.8.8.8',
+                    'vpn.example.com:443','vpn.example.com/','vpn.example.com;','example.com.'):
+            cases.append(dict(WEB_DOMAIN=bad,REALITY_DOMAIN='r.example.com'))
+        cases.append(dict(WEB_DOMAIN='VPN.example.com',REALITY_DOMAIN='vpn.example.com'))
+        for env in cases:
+            with self.subTest(env=env), self.assertRaises(RuntimeError): self.select(env)
+
+    def test_rerun_keeps_both_saved_domains_and_refuses_migration(self):
+        saved=dict(ip='8.8.8.8',domain='vpn.example.com',reality_domain='r.example.com')
+        self.assertEqual(self.select({},saved),['vpn.example.com','r.example.com'])
+        for web,reality in [('other.example.com','r.example.com'),('vpn.example.com','other.example.com')]:
+            with self.assertRaises(RuntimeError):
+                self.select(dict(WEB_DOMAIN=web,REALITY_DOMAIN=reality),saved)
+
+    def test_custom_dns_failure_never_saves_state(self):
+        import socket
+        with tempfile.TemporaryDirectory() as tmp, patch.object(e,'STATE',Path(tmp)), \
+             patch.dict(e.os.environ,dict(PUBLIC_IPV4='8.8.8.8',WEB_DOMAIN='vpn.example.com',
+                        REALITY_DOMAIN='r.example.com'),clear=True), \
+             patch.object(e.socket,'getaddrinfo',return_value=[(None,None,None,None,('1.1.1.1',0))]), \
+             patch.object(e,'save') as save:
+            with self.assertRaises(RuntimeError): e.init()
+            save.assert_not_called()
+
+    def test_custom_init_and_rerun_preserve_credentials(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(e,'STATE',Path(tmp)), \
+             patch.dict(e.os.environ,dict(PUBLIC_IPV4='8.8.8.8',WEB_DOMAIN='vpn.example.com',
+                        REALITY_DOMAIN='r.example.com'),clear=True), \
+             patch.object(e.socket,'getaddrinfo',return_value=[(None,None,None,None,('8.8.8.8',0))]), \
+             patch.object(e.subprocess,'check_output',return_value=''):
+            e.init()
+            before=(Path(tmp)/'state.json').read_bytes()
+            e.os.environ.pop('WEB_DOMAIN');e.os.environ.pop('REALITY_DOMAIN')
+            e.init()
+            self.assertEqual((Path(tmp)/'state.json').read_bytes(),before)
+
 class DiscoveryTests(unittest.TestCase):
     def test_nonstandard_table_and_column_order(self):
         with tempfile.TemporaryDirectory() as tmp:
