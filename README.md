@@ -57,3 +57,11 @@ Package removal is opt-in: set `AUTO_REMOVE=yes` in `/etc/single443/maintenance.
 ## Existing SSH protection
 
 An active stock Fail2ban sshd jail using an SSH-only inet f2b-table is accepted and preserved. Other unmanaged firewall base chains still stop installation; inspect them before changing firewall ownership.
+
+## XHTTP transport
+
+XHTTP uses HTTP/2 from nginx to Xray via grpc_pass; TLS remains terminated at nginx.
+The default mode is stream-up. Clients must negotiate h2 (ALPN); HTTP/3 is not
+served by nginx here because UDP/443 belongs to Hysteria2.
+For existing installations, restore XHTTP mode to stream-up if manually changed,
+then run install.sh --update-only from the new release. Refresh the client subscription.

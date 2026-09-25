@@ -76,6 +76,9 @@ with tempfile.TemporaryDirectory(prefix='xhttp-test-') as directory:
                         'A'*43, 'B'*43], check=True)
         fixture = json.loads((tmp/'xray.json').read_text())
         inbound = next(r for r in fixture['inbounds'] if r['port'] == 10002)
+        mode = sys.argv[sys.argv.index('--mode') + 1] if '--mode' in sys.argv else 'stream-up'
+        assert mode in ('stream-up', 'packet-up', 'stream-one')
+        inbound['streamSettings']['xhttpSettings']['mode'] = mode
         config = dict(log=dict(loglevel='debug'), inbounds=[inbound],
                       outbounds=[dict(protocol='freedom')])
         (tmp/'server.json').write_text(json.dumps(config))
@@ -122,13 +125,21 @@ with tempfile.TemporaryDirectory(prefix='xhttp-test-') as directory:
         upload = subprocess.run(curl + ['--data-binary', '@-'], input=PAYLOAD,
                                 check=True, capture_output=True).stdout
         assert upload == hashlib.sha256(PAYLOAD).hexdigest().encode(), 'Upload corrupted'
-        print('PASS: authenticated XHTTP stream-up via TLS/SNI/nginx, 2 MiB download and upload')
+        if '--legacy' in sys.argv:
+            raise AssertionError('Legacy defect no longer reproduced; review baseline')
+        print(f'PASS: authenticated XHTTP {mode} via TLS/SNI/nginx, 2 MiB download and upload')
     except Exception as error:
         if isinstance(error, subprocess.CalledProcessError):
             print('curl stderr:', error.stderr, 'output bytes:', len(error.stdout or b''))
         for path in tmp.glob('*.log'):
             print(path.name, path.read_text())
-        raise
+        if ('--legacy' in sys.argv and isinstance(error, subprocess.CalledProcessError)
+                and error.returncode == 28
+                and 'accepted tcp:93.184.216.34:18081' in (tmp/'server.log').read_text()
+                and 'blocked target' not in (tmp/'server.log').read_text()):
+            print('PASS: reproduced legacy HTTP1 stream-up timeout after VLESS authentication')
+        else:
+            raise
     finally:
         for process in reversed(processes):
             process.terminate()

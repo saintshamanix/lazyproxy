@@ -55,15 +55,13 @@ jobs:
           trap 'sudo kill "$panel_pid" 2>/dev/null || true' EXIT
           cd "$GITHUB_WORKSPACE"
           sudo python3 tests/awg-api-smoke.py
-      - name: Compare legacy HTTP1 XHTTP forwarding
-        run: |
-          if sudo unshare --net python3 tests/xhttp-smoke.py --legacy; then
-            echo "Legacy forwarding passed this transfer"
-          else
-            echo "Legacy forwarding failed; see transport logs above"
-          fi
+      - name: Reproduce legacy HTTP1 XHTTP forwarding failure
+        run: sudo unshare --net python3 tests/xhttp-smoke.py --legacy
       - name: Authenticated XHTTP transfer through nginx and SNI dispatcher
-        run: sudo unshare --net python3 tests/xhttp-smoke.py
+        run: |
+          sudo unshare --net python3 tests/xhttp-smoke.py
+          sudo unshare --net python3 tests/xhttp-smoke.py --mode packet-up
+          sudo unshare --net python3 tests/xhttp-smoke.py --mode stream-one
       - name: BBR and fail2ban setup with real nftables actions
         shell: bash
         run: sudo bash tests/tuning-smoke.sh
