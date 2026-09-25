@@ -22,6 +22,7 @@ PAYLOAD = os.urandom(2 * 1024 * 1024)
 
 class Echo(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        print('Echo received GET', flush=True)
         self.send_response(200)
         self.send_header('Content-Length', str(len(PAYLOAD)))
         self.end_headers()
@@ -72,7 +73,7 @@ with tempfile.TemporaryDirectory(prefix='xhttp-test-') as directory:
                         'A'*43, 'B'*43], check=True)
         fixture = json.loads((tmp/'xray.json').read_text())
         inbound = next(r for r in fixture['inbounds'] if r['port'] == 10002)
-        config = dict(log=dict(loglevel='warning'), inbounds=[inbound],
+        config = dict(log=dict(loglevel='debug'), inbounds=[inbound],
                       outbounds=[dict(protocol='freedom')])
         (tmp/'server.json').write_text(json.dumps(config))
         launch([XRAY, 'run', '-c', str(tmp/'server.json')], 'server')
@@ -98,7 +99,7 @@ with tempfile.TemporaryDirectory(prefix='xhttp-test-') as directory:
         launch(['nginx', '-c', str(tmp/'nginx.conf'), '-g', 'daemon off;'], 'nginx')
         wait_port(443)
         client = dict(
-            log=dict(loglevel='warning'),
+            log=dict(loglevel='debug'),
             inbounds=[dict(listen='127.0.0.1', port=18080, protocol='socks', settings={})],
             outbounds=[dict(protocol='vless', settings=dict(vnext=[
                 dict(address='127.0.0.1', port=443, users=[
@@ -119,7 +120,9 @@ with tempfile.TemporaryDirectory(prefix='xhttp-test-') as directory:
                                 check=True, capture_output=True).stdout
         assert upload == hashlib.sha256(PAYLOAD).hexdigest().encode(), 'Upload corrupted'
         print('PASS: authenticated XHTTP stream-up via TLS/SNI/nginx, 2 MiB download and upload')
-    except Exception:
+    except Exception as error:
+        if isinstance(error, subprocess.CalledProcessError):
+            print('curl stderr:', error.stderr, 'output bytes:', len(error.stdout or b''))
         for path in tmp.glob('*.log'):
             print(path.name, path.read_text())
         raise
