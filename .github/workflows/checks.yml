@@ -55,6 +55,7 @@ jobs:
           trap 'sudo kill "$panel_pid" 2>/dev/null || true' EXIT
           cd "$GITHUB_WORKSPACE"
           sudo python3 tests/awg-api-smoke.py
+          sudo python3 tests/ip-tls-api-smoke.py
       - name: Authenticated XHTTP transfer through nginx and SNI dispatcher
         run: |
           sudo unshare --net python3 tests/xhttp-smoke.py

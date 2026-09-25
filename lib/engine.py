@@ -695,6 +695,11 @@ def diagnose():
     check('panel API authentication', lambda: API(s))
     check('certificate remaining lifetime', lambda: run(['openssl','x509','-checkend',
           '86400' if s.get('ip_tls') == 'yes' else '604800','-noout','-in',certificate_dir(s)+'fullchain.pem']))
+    if s.get('ip_tls') == 'yes':
+        check('certificate IP SAN', lambda: run(['openssl','x509','-noout','-checkip',s['ip'],
+              '-in',certificate_dir(s)+'fullchain.pem']))
+    check('certificate REALITY DNS SAN', lambda: run(['openssl','x509','-noout','-checkhost',s['reality_domain'],
+          '-in',certificate_dir(s)+'fullchain.pem']))
     for port in (2053,7443,8443,10001,10002,10003):
         def tcp(port=port):
             with socket.create_connection(('127.0.0.1',port),timeout=3):
