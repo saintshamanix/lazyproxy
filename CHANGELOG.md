@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- Optional fresh-install `--ip-tls`: public IPv4 URLs and IP SAN TLS; automatic REALITY DNS/SNI retained.
+- Isolated Certbot 5.8.0 and ACME state, required shortlived profile, six-hour renewal checks, serialized reload with retry.
+- Keep verified internal subscription TLS with DNS SAN; advertise public IP URLs.
+- Mode-aware certificate lifetime check and migration refusal; default domain modes unchanged.
+- Add IP SAN XHTTP transfer and renewal setup checks to Ubuntu CI.
+
 ## 0.2.9
 
 - Add custom WEB/REALITY domain pairs via --domain/--reality-domain or WEB_DOMAIN/REALITY_DOMAIN config.

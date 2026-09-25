@@ -60,6 +60,7 @@ jobs:
           sudo unshare --net python3 tests/xhttp-smoke.py
           sudo unshare --net python3 tests/xhttp-smoke.py --mode packet-up
           sudo unshare --net python3 tests/xhttp-smoke.py --mode stream-one
+          sudo unshare --net python3 tests/xhttp-smoke.py --ip-tls
       - name: BBR and fail2ban setup with real nftables actions
         shell: bash
         run: sudo bash tests/tuning-smoke.sh
@@ -67,3 +68,7 @@ jobs:
         shell: bash
         run: |
           sudo bash -c 'set -Eeuo pipefail; ROOT="$PWD"; source lib/common.sh; source lib/maintenance.sh; mkdir -p /etc/single443; install_maintenance; install_maintenance; systemctl is-enabled single443-maintenance.timer; systemctl is-active single443-maintenance.timer'
+      - name: Isolated IP Certbot and renewal timer
+        shell: bash
+        run: |
+          sudo bash -c 'set -Eeuo pipefail; ROOT="$PWD"; source lib/common.sh; source lib/certs.sh; helper() { echo yes; }; install_renew_hook; install_renew_hook; /opt/single443-certbot-5.8.0/bin/certbot --help all | grep -- --ip-address; systemctl is-active single443-acme.timer'

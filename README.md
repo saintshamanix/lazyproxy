@@ -121,6 +121,41 @@ Changing an existing installation's IP or either domain is deliberately refused:
 migrating certificates, links and client profiles requires a separate procedure.
 `--update-only` uses the saved domains and does not accept domain options.
 
+## Optional public IP + TLS mode
+
+On a **fresh VPS**, add `--ip-tls` to the installation command (or set `IP_TLS=yes`
+in the root-owned config). Default installation still uses automatic domains.
+This mode cannot be combined with `--domain` / `--reality-domain`.
+
+- Website, panel, subscription URLs and TLS proxy endpoints use the public IPv4.
+- REALITY retains `IP-with-dashes.cdn-one.org` for SNI dispatch and local TLS fallback.
+  Its A record must resolve to the VPS, so this hybrid mode still depends on that DNS name.
+- One certificate includes the public IP SAN and the REALITY DNS SAN. Public client
+  connections verify the IP certificate; certificate verification is never disabled.
+  The loopback subscription backend uses the DNS SAN with verified HTTPS.
+- Let's Encrypt IP certificates last **160 hours** and require the `shortlived` profile.
+  Certbot 5.8.0 is installed in `/opt/single443-certbot-5.8.0`; its ACME state is isolated
+  in `/etc/single443/acme` from the distribution's Certbot. TCP/80 must remain reachable.
+- `single443-acme.timer` checks renewal every six hours. After issuance it validates
+  nginx, reloads nginx and restarts x-ui to load the Hysteria2 certificate. Failed
+  reloads are retried on the next successful renewal check, even without reissuance.
+  Short-lived certificate diagnostics require at least 24 hours remaining.
+- Reruns without mode options preserve the saved mode. Changing an existing
+  installation between domain and IP modes is refused; existing profiles stay unchanged.
+
+```bash
+sudo systemctl list-timers single443-acme.timer
+sudo journalctl -u single443-acme.service --no-pager -n 50
+sudo systemctl start single443-acme.service
+```
+
+CI tests IP SAN verification with a trusted test certificate and authenticated XHTTP
+transfer through the actual nginx templates. Public ACME issuance and imports in
+Shadowrocket/INCY on a real VPS still require an installation test; CI is not that evidence.
+
+Sources: [Let's Encrypt IP certificates](https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability/),
+[Certbot IP support](https://letsencrypt.org/2026/03/11/shorter-certs-certbot/).
+
 ## Updating an existing installation
 
 Update the installer-managed components without upgrading the panel version:

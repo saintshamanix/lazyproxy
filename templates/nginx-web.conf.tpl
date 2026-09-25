@@ -7,8 +7,8 @@ server {
 server {
     listen 127.0.0.1:7443 ssl http2;
     server_name @DOMAIN@ @REALITY_DOMAIN@;
-    ssl_certificate /etc/letsencrypt/live/single443/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/single443/privkey.pem;
+    ssl_certificate @CERT_DIR@fullchain.pem;
+    ssl_certificate_key @CERT_DIR@privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
     root /var/www/single443;
     index index.html;

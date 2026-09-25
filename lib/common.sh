@@ -29,10 +29,13 @@ backup_begin() {
   MAINTENANCE_WAS_ACTIVE=no; MAINTENANCE_WAS_ENABLED=no
   systemctl is-active --quiet single443-maintenance.timer && MAINTENANCE_WAS_ACTIVE=yes
   systemctl is-enabled --quiet single443-maintenance.timer && MAINTENANCE_WAS_ENABLED=yes
+  IP_RENEW_WAS_ACTIVE=no; IP_RENEW_WAS_ENABLED=no
+  systemctl is-active --quiet single443-acme.timer && IP_RENEW_WAS_ACTIVE=yes
+  systemctl is-enabled --quiet single443-acme.timer && IP_RENEW_WAS_ENABLED=yes
   BACKUP_IN_PROGRESS=yes
   systemctl stop x-ui 2>/dev/null || true
   # SQLite and WAL are copied with the owning service stopped.
-  for path in /usr/local/libexec/single443-maintenance /etc/systemd/system/single443-maintenance.service /etc/systemd/system/single443-maintenance.timer /etc/single443/maintenance.env /var/lib/single443-maintenance /etc/fail2ban /etc/sysctl.d/99-single443-bbr.conf /etc/nginx /etc/x-ui /usr/local/x-ui /etc/systemd/system/x-ui.service /var/www/single443 /etc/single443/access.txt /etc/single443/User6-AmneziaWG.conf /etc/single443/subscription.json /etc/single443/firewall.nft /etc/single443/firewall-expected.txt /etc/systemd/system/single443-firewall.service; do
+  for path in /etc/systemd/system/single443-acme.service /etc/systemd/system/single443-acme.timer /etc/single443/acme/renewal-hooks /usr/local/libexec/single443-maintenance /etc/systemd/system/single443-maintenance.service /etc/systemd/system/single443-maintenance.timer /etc/single443/maintenance.env /var/lib/single443-maintenance /etc/fail2ban /etc/sysctl.d/99-single443-bbr.conf /etc/nginx /etc/x-ui /usr/local/x-ui /etc/systemd/system/x-ui.service /var/www/single443 /etc/single443/access.txt /etc/single443/User6-AmneziaWG.conf /etc/single443/subscription.json /etc/single443/firewall.nft /etc/single443/firewall-expected.txt /etc/systemd/system/single443-firewall.service; do
     if [[ -e $path ]]; then
       mkdir -p "$BACKUP/root$(dirname "$path")"
       cp -a "$path" "$BACKUP/root$path"
@@ -46,13 +49,15 @@ backup_begin() {
 rollback() {
   log "Rolling back panel/nginx from $BACKUP"
   if [[ ${MAINTENANCE_CHANGED:-no} == yes ]]; then systemctl stop single443-maintenance.timer; fi
+  if [[ ${IP_RENEW_CHANGED:-no} == yes ]]; then systemctl stop single443-acme.timer; fi
   systemctl stop x-ui nginx 2>/dev/null || true
   if [[ ${IPLIMIT_CHANGED:-no} == yes ]]; then systemctl stop fail2ban; fi
-  for path in /usr/local/libexec/single443-maintenance /etc/systemd/system/single443-maintenance.service /etc/systemd/system/single443-maintenance.timer /etc/single443/maintenance.env /var/lib/single443-maintenance /etc/fail2ban /etc/sysctl.d/99-single443-bbr.conf /etc/nginx /etc/x-ui /usr/local/x-ui /etc/systemd/system/x-ui.service /var/www/single443 /etc/single443/access.txt /etc/single443/User6-AmneziaWG.conf /etc/single443/subscription.json /etc/single443/firewall.nft /etc/single443/firewall-expected.txt /etc/systemd/system/single443-firewall.service; do
+  for path in /etc/systemd/system/single443-acme.service /etc/systemd/system/single443-acme.timer /etc/single443/acme/renewal-hooks /usr/local/libexec/single443-maintenance /etc/systemd/system/single443-maintenance.service /etc/systemd/system/single443-maintenance.timer /etc/single443/maintenance.env /var/lib/single443-maintenance /etc/fail2ban /etc/sysctl.d/99-single443-bbr.conf /etc/nginx /etc/x-ui /usr/local/x-ui /etc/systemd/system/x-ui.service /var/www/single443 /etc/single443/access.txt /etc/single443/User6-AmneziaWG.conf /etc/single443/subscription.json /etc/single443/firewall.nft /etc/single443/firewall-expected.txt /etc/systemd/system/single443-firewall.service; do
     rm -rf -- "$path"
     if [[ -e $BACKUP/root$path ]]; then cp -a "$BACKUP/root$path" "$path"; fi
   done
   cp "$BACKUP/state.json" "$STATE/state.json"
+  if declare -F restore_ip_renewal >/dev/null; then restore_ip_renewal; fi
   if declare -F restore_maintenance >/dev/null; then restore_maintenance; fi
   if declare -F restore_iplimit >/dev/null; then restore_iplimit; fi
   if declare -F restore_bbr >/dev/null; then restore_bbr; fi

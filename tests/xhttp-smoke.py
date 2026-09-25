@@ -19,6 +19,8 @@ subprocess.run(['ip', 'link', 'set', 'lo', 'up'], check=True)
 # Public address exists only on loopback in this isolated namespace.
 # Current Xray intentionally blocks proxy destinations in loopback/private ranges.
 subprocess.run(['ip', 'addr', 'add', '93.184.216.34/32', 'dev', 'lo'], check=True)
+IP_TLS = '--ip-tls' in sys.argv
+TLS_HOST = '93.184.216.34' if IP_TLS else 'web.example.com'
 XRAY = str(next(Path('/tmp/single443-api/x-ui/bin').glob('xray-linux-*')))
 PAYLOAD = os.urandom(2 * 1024 * 1024)
 
@@ -69,11 +71,12 @@ with tempfile.TemporaryDirectory(prefix='xhttp-test-') as directory:
     try:
         subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
                         '-days', '1', '-subj', '/CN=web.example.com',
-                        '-addext', 'subjectAltName=DNS:web.example.com',
+                        '-addext', 'subjectAltName=DNS:web.example.com,DNS:reality.example.com,IP:93.184.216.34',
                         '-keyout', str(tmp/'privkey.pem'), '-out', str(tmp/'fullchain.pem')],
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run([sys.executable, str(ROOT/'tests/render_fixtures.py'), str(tmp),
-                        'A'*43, 'B'*43], check=True)
+                        'A'*43, 'B'*43], check=True,
+                       env=dict(os.environ, TEST_IP_TLS='yes' if IP_TLS else 'no'))
         fixture = json.loads((tmp/'xray.json').read_text())
         inbound = next(r for r in fixture['inbounds'] if r['port'] == 10002)
         mode = sys.argv[sys.argv.index('--mode') + 1] if '--mode' in sys.argv else 'stream-up'
@@ -108,10 +111,10 @@ with tempfile.TemporaryDirectory(prefix='xhttp-test-') as directory:
             log=dict(loglevel='debug'),
             inbounds=[dict(listen='127.0.0.1', port=18080, protocol='socks', settings={})],
             outbounds=[dict(protocol='vless', settings=dict(vnext=[
-                dict(address='127.0.0.1', port=443, users=[
+                dict(address=TLS_HOST if IP_TLS else '127.0.0.1', port=443, users=[
                     dict(id=inbound['settings']['clients'][0]['id'], encryption='none')])]),
                 streamSettings=dict(network='xhttp', security='tls',
-                    tlsSettings=dict(serverName='web.example.com', alpn=['h2'],
+                    tlsSettings=dict(serverName=TLS_HOST, alpn=['h2'],
                         certificates=[dict(certificateFile=str(tmp/'fullchain.pem'), usage='verify')]),
                     xhttpSettings=inbound['streamSettings']['xhttpSettings']))])
         # Trust only the generated test certificate for this isolated client.

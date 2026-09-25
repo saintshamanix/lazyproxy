@@ -9,6 +9,7 @@ source "$ROOT/lib/firewall.sh"
 source "$ROOT/lib/tuning.sh"
 source "$ROOT/lib/iplimit.sh"
 source "$ROOT/lib/maintenance.sh"
+source "$ROOT/lib/certs.sh"
 [[ $EUID == 0 ]] || die 'Run as root'
 [[ -f $STATE/state.json ]] || die 'No managed installation found'
 exec 9>/run/lock/single443.lock
@@ -37,6 +38,7 @@ activate_nginx
 bash "$ROOT/diagnose.sh"
 mkdir -p /opt/single443
 if [[ $(realpath "$ROOT") != /opt/single443 ]]; then cp -a "$ROOT/." /opt/single443/; fi
+install_renew_hook
 install_maintenance
 TX_ACTIVE=no
 trap - ERR INT TERM
