@@ -31,6 +31,9 @@ print('PASS native upstream QR exports: IP address, external port, TLS and REALI
 # Fresh-install policy: retain all transports but seed only REALITY.
 for row in api.call('inbounds/list'):
     api.call('inbounds/del/'+str(row['id']), {})
+# Upstream retains global clients after deleting their last inbound.
+# This disposable panel must be empty before exercising a fresh installation.
+api.call('clients/delOrphans', {})
 s.update(seed_clients=['reality'], sub_ids={'reality': 'only-reality-test'},
          installed_version='v3.8.5', inbound_ids={})
 for name, row in zip(e.CLIENT_NAMES, e.inbound_payloads(s)):
