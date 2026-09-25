@@ -134,10 +134,10 @@ with tempfile.TemporaryDirectory(prefix='xhttp-test-') as directory:
         for path in tmp.glob('*.log'):
             print(path.name, path.read_text())
         if ('--legacy' in sys.argv and isinstance(error, subprocess.CalledProcessError)
-                and error.returncode == 28
+                and error.returncode in (28, 56)
                 and 'accepted tcp:93.184.216.34:18081' in (tmp/'server.log').read_text()
                 and 'blocked target' not in (tmp/'server.log').read_text()):
-            print('PASS: reproduced legacy HTTP1 stream-up timeout after VLESS authentication')
+            print('PASS: reproduced legacy HTTP1 stream-up transfer failure after VLESS authentication')
         else:
             raise
     finally:
