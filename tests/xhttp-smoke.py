@@ -16,6 +16,9 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 assert os.readlink('/proc/self/ns/net') != os.readlink('/proc/1/ns/net')
 subprocess.run(['ip', 'link', 'set', 'lo', 'up'], check=True)
+# Public address exists only on loopback in this isolated namespace.
+# Current Xray intentionally blocks proxy destinations in loopback/private ranges.
+subprocess.run(['ip', 'addr', 'add', '93.184.216.34/32', 'dev', 'lo'], check=True)
 XRAY = str(next(Path('/tmp/single443-api/x-ui/bin').glob('xray-linux-*')))
 PAYLOAD = os.urandom(2 * 1024 * 1024)
 
@@ -50,7 +53,7 @@ def wait_port(port):
     raise RuntimeError(f'Listener {port} did not start')
 
 
-server = http.server.ThreadingHTTPServer(('127.0.0.1', 18081), Echo)
+server = http.server.ThreadingHTTPServer(('93.184.216.34', 18081), Echo)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 with tempfile.TemporaryDirectory(prefix='xhttp-test-') as directory:
     tmp = Path(directory)
@@ -113,7 +116,7 @@ with tempfile.TemporaryDirectory(prefix='xhttp-test-') as directory:
         launch([XRAY, 'run', '-c', str(tmp/'client.json')], 'client')
         wait_port(18080)
         curl = ['curl', '-fsS', '--max-time', '25', '--noproxy', '',
-                '--socks5-hostname', '127.0.0.1:18080', 'http://127.0.0.1:18081/']
+                '--socks5-hostname', '127.0.0.1:18080', 'http://93.184.216.34:18081/']
         download = subprocess.run(curl, check=True, capture_output=True).stdout
         assert download == PAYLOAD, 'Download corrupted'
         upload = subprocess.run(curl + ['--data-binary', '@-'], input=PAYLOAD,
