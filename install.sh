@@ -32,10 +32,11 @@ CONFIG=''
 while (($#)); do
   case $1 in
     --version) PANEL_VERSION=${2:?Missing version}; shift 2 ;;
+    --ip-tls) IP_TLS=yes; shift ;;
     --domain) WEB_DOMAIN=${2:?Missing WEB domain}; shift 2 ;;
     --reality-domain) REALITY_DOMAIN=${2:?Missing REALITY domain}; shift 2 ;;
     --config) CONFIG=${2:?Missing config}; shift 2 ;;
-    --help) echo 'install.sh [--version latest|3.8.5] [--config /root/config.env] [--domain web.example.com --reality-domain reality.example.com] | --update-only'; exit 0 ;;
+    --help) echo 'install.sh [--version latest|3.8.5] [--config /root/config.env] [--ip-tls] [--domain web.example.com --reality-domain reality.example.com] | --update-only'; exit 0 ;;
     *) die "Unknown option: $1" ;;
   esac
 done
@@ -46,6 +47,7 @@ if [[ -n $CONFIG ]]; then
   source "$CONFIG"
 fi
 export PANEL_VERSION AUTO_DOMAIN_SUFFIX=${AUTO_DOMAIN_SUFFIX:-cdn-one.org} PUBLIC_IPV4=${PUBLIC_IPV4:-}
+export IP_TLS=${IP_TLS:-}
 export WEB_DOMAIN=${WEB_DOMAIN:-} REALITY_DOMAIN=${REALITY_DOMAIN:-}
 export ACME_EMAIL=${ACME_EMAIL:-} ACME_STAGING=${ACME_STAGING:-no}
 source /etc/os-release

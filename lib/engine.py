@@ -59,9 +59,24 @@ def path_value(value):
     require(isinstance(value, str) and re.fullmatch(r'/(?:[A-Za-z0-9_-]+/)+', value), 'Unsupported or unsafe subscription path; nginx unchanged')
     return value
 
+def certificate_dir(s):
+    return '/etc/single443/acme/live/single443/' if s.get('ip_tls') == 'yes' else CERT
+
+
 def installation_domains(ip, saved=None):
     web = os.environ.get('WEB_DOMAIN', '')
     reality = os.environ.get('REALITY_DOMAIN', '')
+    mode = os.environ.get('IP_TLS', '') or (saved or {}).get('ip_tls', 'no')
+    require(mode in ('yes', 'no'), 'IP_TLS must be yes or no')
+    if saved:
+        require(mode == saved.get('ip_tls', 'no'), 'Changing TLS mode requires a separate migration')
+    if mode == 'yes':
+        require(not web and not reality, 'IP TLS uses an automatic REALITY domain; omit custom domain options')
+        names = [ip, saved['reality_domain'] if saved else
+                 domain(ip.replace('.', '-') + '.' + domain(os.environ.get('AUTO_DOMAIN_SUFFIX', 'cdn-one.org')))]
+        if saved:
+            require(saved['ip'] == ip and saved['domain'] == ip, 'IP changed; migration refused')
+        return names
     require(bool(web) == bool(reality),
             'Set both WEB_DOMAIN and REALITY_DOMAIN, or leave both empty')
     if web:
@@ -100,6 +115,8 @@ def init():
     saved = load() if (STATE / 'state.json').exists() else None
     names = installation_domains(ip, saved)
     for name in names:
+        if name == ip:
+            continue
         addresses = {x[4][0] for x in socket.getaddrinfo(name, None, socket.AF_INET)}
         require(addresses == {ip}, f'DNS A for {name} does not exclusively resolve to this VPS')
         # AAAA pointing elsewhere breaks ACME HTTP-01 validation.
@@ -107,7 +124,7 @@ def init():
         require(not aaaa, f'{name} has AAAA/CNAME records; this IPv4-only adapter requires unambiguous DNS')
     if saved:
         return
-    s = dict(ip=ip, domain=names[0], reality_domain=names[1], username='admin_' + secrets.token_hex(5),
+    s = dict(ip=ip, ip_tls='yes' if names[0] == ip else 'no', domain=names[0], reality_domain=names[1], username='admin_' + secrets.token_hex(5),
              password=secrets.token_urlsafe(32), sub_ids={name: secrets.token_hex(16) for name in CLIENT_NAMES}, configured=False,
              installed_version='', short_id=secrets.token_hex(8), trojan_password=secrets.token_urlsafe(32),
              hysteria_auth=secrets.token_urlsafe(32), grpc_service='g' + secrets.token_hex(12))
@@ -165,8 +182,8 @@ def configure_panel():
     settings = api.call('setting/all', {})
     require(isinstance(settings, dict), 'Settings API returned unexpected shape')
     if not s['configured']:
-        changes = dict(subEnable=True, subListen='127.0.0.1', subPort=2096, subDomain=s['domain'],
-                       subPath=s['sub_path'], subCertFile=CERT+'fullchain.pem', subKeyFile=CERT+'privkey.pem',
+        changes = dict(subEnable=True, subListen='127.0.0.1', subPort=2096, subDomain=s['reality_domain'] if s.get('ip_tls') == 'yes' else s['domain'],
+                       subPath=s['sub_path'], subCertFile=certificate_dir(s)+'fullchain.pem', subKeyFile=certificate_dir(s)+'privkey.pem',
                        subJsonEnable=True, subJsonPath=s['json_path'], subClashEnable=True, subClashPath=s['clash_path'],
                        subURI='https://'+s['domain']+s['sub_path'], subJsonURI='https://'+s['domain']+s['json_path'],
                        subClashURI='https://'+s['domain']+s['clash_path'])
@@ -338,7 +355,7 @@ def detect_country(s):
 
 def inbound_payloads(s):
     tls = dict(serverName=s['domain'], minVersion='1.2', maxVersion='1.3', alpn=['h3'],
-               certificates=[dict(certificateFile=CERT+'fullchain.pem', keyFile=CERT+'privkey.pem', usage='encipherment')],
+               certificates=[dict(certificateFile=certificate_dir(s)+'fullchain.pem', keyFile=certificate_dir(s)+'privkey.pem', usage='encipherment')],
                settings=dict(serverName=s['domain'], allowInsecure=False, fingerprint='chrome'))
     streams = {
         'reality': dict(network='tcp', security='reality', tcpSettings=dict(acceptProxyProtocol=False, header=dict(type='none')),
@@ -564,7 +581,7 @@ def render(templates):
     d = json.loads((STATE/'subscription.json').read_text())
     replacements = {'DOMAIN':s['domain'], 'REALITY_DOMAIN':s['reality_domain'], 'PANEL_PATH':s['panel_path'],
                     'WS_PATH':s['ws_path'], 'XHTTP_PATH':s['xhttp_path'], 'GRPC_SERVICE':s['grpc_service'],
-                    'SUB_LOCATIONS':sub_locations(d)}
+                    'CERT_DIR':certificate_dir(s), 'SUB_LOCATIONS':sub_locations(d)}
     for source, target in [('nginx-stream.conf.tpl','/etc/nginx/single443-stream.conf'),
                            ('nginx-web.conf.tpl','/etc/nginx/conf.d/single443-web.conf')]:
         text = (Path(templates)/source).read_text()
@@ -676,7 +693,13 @@ def diagnose():
     for service in ('x-ui','nginx'):
         check(service+' active', lambda service=service: run(['systemctl','is-active','--quiet',service]))
     check('panel API authentication', lambda: API(s))
-    check('certificate valid for next 7 days', lambda: run(['openssl','x509','-checkend','604800','-noout','-in',CERT+'fullchain.pem']))
+    check('certificate remaining lifetime', lambda: run(['openssl','x509','-checkend',
+          '86400' if s.get('ip_tls') == 'yes' else '604800','-noout','-in',certificate_dir(s)+'fullchain.pem']))
+    if s.get('ip_tls') == 'yes':
+        check('certificate IP SAN', lambda: run(['openssl','x509','-noout','-checkip',s['ip'],
+              '-in',certificate_dir(s)+'fullchain.pem']))
+    check('certificate REALITY DNS SAN', lambda: run(['openssl','x509','-noout','-checkhost',s['reality_domain'],
+          '-in',certificate_dir(s)+'fullchain.pem']))
     for port in (2053,7443,8443,10001,10002,10003):
         def tcp(port=port):
             with socket.create_connection(('127.0.0.1',port),timeout=3):

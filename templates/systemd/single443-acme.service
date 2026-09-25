@@ -1,0 +1,10 @@
+[Unit]
+Description=Renew single443 short-lived IP TLS certificate
+Wants=network-online.target
+After=network-online.target nginx.service
+ConditionPathExists=/etc/single443/acme/renewal/single443.conf
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/bin/bash /opt/single443/lib/renew-ip.sh

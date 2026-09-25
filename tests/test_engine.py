@@ -30,6 +30,35 @@ class DomainSelectionTests(unittest.TestCase):
         self.assertEqual(self.select(dict(WEB_DOMAIN='VPN.Example.com', REALITY_DOMAIN='reality.example.com')),
                          ['vpn.example.com','reality.example.com'])
 
+    def test_ip_tls_selection_and_mode_preservation(self):
+        names=['8.8.8.8','8-8-8-8.cdn-one.org']
+        self.assertEqual(self.select(dict(IP_TLS='yes')),names)
+        saved=dict(ip='8.8.8.8',ip_tls='yes',domain=names[0],reality_domain=names[1])
+        self.assertEqual(self.select({},saved),names)
+        for env in [dict(IP_TLS='no'),dict(WEB_DOMAIN='w.example.com',REALITY_DOMAIN='r.example.com')]:
+            with self.assertRaises(RuntimeError): self.select(env,saved)
+        old=dict(ip='8.8.8.8',domain='w.example.com',reality_domain='r.example.com')
+        with self.assertRaises(RuntimeError): self.select(dict(IP_TLS='yes'),old)
+        with self.assertRaises(RuntimeError): self.select(dict(IP_TLS='invalid'))
+
+    def test_ip_init_only_resolves_reality_dns(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(e,'STATE',Path(tmp)), \
+             patch.dict(e.os.environ,dict(PUBLIC_IPV4='8.8.8.8',IP_TLS='yes'),clear=True), \
+             patch.object(e.socket,'getaddrinfo',return_value=[(None,None,None,None,('8.8.8.8',0))]) as dns, \
+             patch.object(e.subprocess,'check_output',return_value='') as dig:
+            e.init()
+            s=e.load()
+            self.assertEqual(s['domain'],'8.8.8.8')
+            self.assertEqual(s['ip_tls'],'yes')
+            self.assertIn('/etc/single443/acme/',e.certificate_dir(s))
+            self.assertEqual(dns.call_args.args[0],s['reality_domain'])
+            self.assertEqual(dns.call_count,1)
+            self.assertEqual(dig.call_count,1)
+            before=(Path(tmp)/'state.json').read_bytes()
+            e.os.environ.pop('IP_TLS')
+            e.init()
+            self.assertEqual((Path(tmp)/'state.json').read_bytes(),before)
+
     def test_incomplete_colliding_and_unsafe_names(self):
         cases=[dict(WEB_DOMAIN='vpn.example.com'),dict(REALITY_DOMAIN='r.example.com')]
         for bad in ('https://vpn.example.com','*.example.com','localhost','8.8.8.8',
