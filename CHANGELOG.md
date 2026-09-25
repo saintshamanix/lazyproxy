@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.6
+
+- Accept verified stock Fail2ban sshd rules restricted to TCP/22 during firewall preflight. Preserve the existing SSH ban table.
+- Keep rejecting unrelated base chains, broader Fail2ban rules and unverified jails.
+- Add parser unit tests and real nftables namespace coverage for SSH bans and repeated firewall application.
+
 ## 0.2.5
 
 - Add persistent systemd maintenance, gated by 72 hours since the last successful run.

@@ -16,17 +16,11 @@ firewall_preflight() {
     die 'firewalld is active; resolve the existing policy before installing'
   fi
   nft -j list ruleset > "$STATE/firewall-before-check.json"
-  python3 - "$STATE/firewall-before-check.json" <<'PY'
-import json, sys
-from pathlib import Path
-owned={"single443"}
-if Path("/etc/fail2ban/jail.d/single443-ipl.local").is_file():
-    owned.update(("single443_f2b_tcp", "single443_f2b_udp"))
-items=json.load(open(sys.argv[1]))['nftables']
-foreign=[x['chain'] for x in items if 'chain' in x and 'hook' in x['chain'] and not (x['chain']['family']=='inet' and x['chain']['table'] in owned)]
-if foreign:
-    sys.exit('Existing unmanaged firewall base chains detected; refusing mixed firewall policies')
-PY
+  local -a check_args=()
+  if systemctl is-active --quiet fail2ban && fail2ban-client status sshd >/dev/null 2>&1; then
+    check_args+=(--allow-sshd)
+  fi
+  python3 "$ROOT/lib/firewall_check.py" "$STATE/firewall-before-check.json" "${check_args[@]}"
   # Reject legacy rules too: they are not represented by nft list ruleset.
   for saver in iptables-legacy-save ip6tables-legacy-save; do
     if command -v "$saver" >/dev/null; then

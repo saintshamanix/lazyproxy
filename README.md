@@ -53,3 +53,7 @@ Package removal is opt-in: set `AUTO_REMOVE=yes` in `/etc/single443/maintenance.
 - Logs: `journalctl -u single443-maintenance.service`
 - Run now: `sudo /usr/local/libexec/single443-maintenance --force`
 - Disable: `sudo systemctl disable --now single443-maintenance.timer` (installer reruns enable it again).
+
+## Existing SSH protection
+
+An active stock Fail2ban sshd jail using an SSH-only inet f2b-table is accepted and preserved. Other unmanaged firewall base chains still stop installation; inspect them before changing firewall ownership.
