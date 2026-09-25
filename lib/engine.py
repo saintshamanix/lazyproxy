@@ -124,8 +124,8 @@ def init():
         require(not aaaa, f'{name} has AAAA/CNAME records; this IPv4-only adapter requires unambiguous DNS')
     if saved:
         return
-    s = dict(ip=ip, ip_tls='yes' if names[0] == ip else 'no', domain=names[0], reality_domain=names[1], username='admin_' + secrets.token_hex(5),
-             password=secrets.token_urlsafe(32), sub_ids={name: secrets.token_hex(16) for name in CLIENT_NAMES}, configured=False,
+    s = dict(seed_clients=['reality'], ip=ip, ip_tls='yes' if names[0] == ip else 'no', domain=names[0], reality_domain=names[1], username='admin_' + secrets.token_hex(5),
+             password=secrets.token_urlsafe(32), sub_ids={'reality': secrets.token_hex(16)}, configured=False,
              installed_version='', short_id=secrets.token_hex(8), trojan_password=secrets.token_urlsafe(32),
              hysteria_auth=secrets.token_urlsafe(32), grpc_service='g' + secrets.token_hex(12))
     for key in ('panel_path', 'ws_path', 'xhttp_path', 'sub_path', 'json_path', 'clash_path'):
@@ -302,7 +302,7 @@ def rename_clients(s, api):
     """Migrate legacy installer names; preserve user-defined client names."""
     rows = api.call('inbounds/list')
     plans = []
-    for name in MANAGED_NAMES:
+    for name in s.get('seed_clients', MANAGED_NAMES):
         row, client = managed_client(s, rows, name)
         target = client_label(name)
         if client['email'] != 'single443-'+name:
@@ -369,14 +369,14 @@ def inbound_payloads(s):
     result = []
     for name, port in [('reality',8443), ('ws',10001), ('xhttp',10002), ('grpc',10003), ('hysteria',443)]:
         protocol = 'hysteria' if name == 'hysteria' else 'trojan' if name == 'grpc' else 'vless'
-        client = dict(email=client_label(name), enable=True, subId=s['sub_ids'][name], limitIp=0, totalGB=0, expiryTime=0, reset=0, tgId=0)
+        client = dict(email=client_label(name), enable=True, subId=s['sub_ids'].get(name, ''), limitIp=0, totalGB=0, expiryTime=0, reset=0, tgId=0)
         if protocol == 'vless':
             client.update(id=s['uuids'][name], flow='xtls-rprx-vision' if name == 'reality' else '')
         elif protocol == 'trojan':
             client['password'] = s['trojan_password']
         else:
             client['auth'] = s['hysteria_auth']
-        settings = dict(clients=[client])
+        settings = dict(clients=[client] if name in s.get('seed_clients', CLIENT_NAMES) else [])
         if protocol == 'vless':
             settings.update(decryption='none', fallbacks=[])
         if protocol == 'hysteria':
@@ -443,10 +443,12 @@ def configure_amnezia(s, api):
         require(not any(row.get('port') == 51820 for row in rows), 'UDP/51820 already assigned in panel')
         occupied = subprocess.check_output(['ss','-H','-lnu','sport = :51820'], text=True)
         require(not occupied.strip(), 'UDP/51820 already occupied')
-        s['sub_ids'].setdefault(name, secrets.token_hex(16))
+        seeded = name in s.get('seed_clients', MANAGED_NAMES)
+        if seeded:
+            s['sub_ids'].setdefault(name, secrets.token_hex(16))
         # The upstream API generates the server obfuscation, keypairs and tunnel
         # address. Do not invent parameters or install a competing AWG daemon.
-        client = dict(email=client_label(name), enable=True, subId=s['sub_ids'][name],
+        client = dict(email=client_label(name), enable=True, subId=s['sub_ids'].get(name, ''),
                       totalGB=0, expiryTime=0, limitIp=0)
         api.call('inbounds/add', dict(remark=label, enable=True, listen='0.0.0.0', port=51820,
                  protocol='amneziawg', shareAddrStrategy='custom', shareAddr=s['domain'],
@@ -454,7 +456,8 @@ def configure_amnezia(s, api):
                  streamSettings='{}', sniffing='{}', allocate='{}', total=0, expiryTime=0))
         matches = [row for row in api.call('inbounds/list') if row.get('remark') == label]
         require(len(matches) == 1, 'AmneziaWG creation could not be verified')
-        api.call('clients/add', dict(client=client, inboundIds=[matches[0]['id']]))
+        if seeded:
+            api.call('clients/add', dict(client=client, inboundIds=[matches[0]['id']]))
         matches = [row for row in api.call('inbounds/list') if row.get('id') == matches[0]['id']]
         require(len(matches) == 1, 'AmneziaWG client creation could not be verified')
     row = matches[0]
@@ -463,10 +466,10 @@ def configure_amnezia(s, api):
     data = json_object(row['settings'])
     clients = [c for c in data.get('clients',[]) if s['sub_ids'].get(name)
                and c.get('subId') == s['sub_ids'][name]]
-    require(len(clients) == 1,
-            'Managed AmneziaWG subscription changed')
-    require(all(clients[0].get(key) for key in ('privateKey','publicKey','allowedIPs'))
-            and data.get('server',{}).get('privateKey'), 'Upstream did not generate AWG keys/address')
+    if name in s.get('seed_clients', MANAGED_NAMES):
+        require(len(clients) == 1, 'Managed AmneziaWG subscription changed')
+        require(all(clients[0].get(key) for key in ('privateKey','publicKey','allowedIPs'))
+                and data.get('server',{}).get('privateKey'), 'Upstream did not generate AWG keys/address')
     s['inbound_ids'][name] = row['id']
     if row['remark'] != label:
         api.call('inbounds/update/'+str(row['id']), dict(row, remark=label))
@@ -526,7 +529,8 @@ def inbounds():
     save(s)
     configure_amnezia(s, api)
     rename_clients(s, api)
-    export_amnezia(s, api)
+    if 'amneziawg' in s.get('seed_clients', MANAGED_NAMES):
+        export_amnezia(s, api)
     settings = api.call('setting/all', {})
     require('subTitle' in settings, 'Upstream subscription title setting unavailable')
     if settings['subTitle'] != 'Casper area':
@@ -613,7 +617,8 @@ def render(templates):
         access += f'\n{name} subscription: https://{s["domain"]}{d["main_path"]}{sub_id}\n'
         if d['clash_path'] and name != 'amneziawg':
             access += f'{name} Mihomo: https://{s["domain"]}{d["clash_path"]}{sub_id}\n'
-    access += '\nAmneziaWG native config (private): /etc/single443/User6-AmneziaWG.conf\n'
+    if 'amneziawg' in s.get('seed_clients', MANAGED_NAMES):
+        access += '\nAmneziaWG native config (private): /etc/single443/User6-AmneziaWG.conf\n'
     access += f'\nINCY routing: https://{s["domain"]}/routing/incy.json\n'
     (STATE/'access.txt').write_text(access)
     (STATE/'access.txt').chmod(0o600)

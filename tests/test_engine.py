@@ -20,6 +20,26 @@ def settings():
     return dict(subEnable=True,subListen='127.0.0.1',subPort=32123,subPath='/random123/',subDomain='sub.example.com',
                 subCertFile='',subKeyFile='',subJsonEnable=True,subJsonPath='/json123/',subClashEnable=True,subClashPath='/clash123/')
 
+class SingleClientPolicyTests(unittest.TestCase):
+    def test_only_reality_seeded_and_other_transports_retained(self):
+        s=state()
+        s.update(seed_clients=['reality'],sub_ids={'reality':'one-sub'})
+        rows=e.inbound_payloads(s)
+        self.assertEqual(len(rows),5)
+        for name,row in zip(e.CLIENT_NAMES,rows):
+            clients=e.json_object(row['settings'])['clients']
+            if name == 'reality':
+                self.assertEqual(len(clients),1)
+                self.assertEqual(clients[0]['email'],'User1')
+                self.assertEqual(clients[0]['flow'],'xtls-rprx-vision')
+            else:
+                self.assertEqual(clients,[])
+            self.assertTrue(row['enable'])
+
+    def test_legacy_state_retains_five_seeded_clients(self):
+        self.assertEqual(sum(len(e.json_object(row['settings'])['clients'])
+                             for row in e.inbound_payloads(state())),5)
+
 class DomainSelectionTests(unittest.TestCase):
     def select(self, env, saved=None):
         with patch.dict(e.os.environ, env, clear=True):
@@ -50,6 +70,8 @@ class DomainSelectionTests(unittest.TestCase):
             s=e.load()
             self.assertEqual(s['domain'],'8.8.8.8')
             self.assertEqual(s['ip_tls'],'yes')
+            self.assertEqual(s['seed_clients'],['reality'])
+            self.assertEqual(set(s['sub_ids']),{'reality'})
             self.assertIn('/etc/single443/acme/',e.certificate_dir(s))
             self.assertEqual(dns.call_args.args[0],s['reality_domain'])
             self.assertEqual(dns.call_count,1)

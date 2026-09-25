@@ -56,6 +56,10 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           sudo python3 tests/awg-api-smoke.py
           sudo python3 tests/ip-tls-api-smoke.py
+      - name: Validate empty non-REALITY inbounds with actual Xray
+        run: |
+          TEST_SINGLE_CLIENT=yes python3 tests/render_fixtures.py /tmp/single443-test AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+          sudo /tmp/single443-api/x-ui/bin/xray-linux-amd64 run -test -config /tmp/single443-test/xray.json
       - name: Authenticated XHTTP transfer through nginx and SNI dispatcher
         run: |
           sudo unshare --net python3 tests/xhttp-smoke.py

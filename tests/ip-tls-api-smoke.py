@@ -27,3 +27,27 @@ for name, row in zip(e.CLIENT_NAMES, e.inbound_payloads(s)):
     assert q.get('sni') == [s['reality_domain'] if name == 'reality' else s['ip']], name
     assert q.get('allowInsecure', ['0']) in (['0'], ['false']), name
 print('PASS native upstream QR exports: IP address, external port, TLS and REALITY SNI')
+
+# Fresh-install policy: retain all transports but seed only REALITY.
+for row in api.call('inbounds/list'):
+    api.call('inbounds/del/'+str(row['id']), {})
+s.update(seed_clients=['reality'], sub_ids={'reality': 'only-reality-test'},
+         installed_version='v3.8.5', inbound_ids={})
+for name, row in zip(e.CLIENT_NAMES, e.inbound_payloads(s)):
+    api.call('inbounds/add', row)
+import tempfile
+with tempfile.TemporaryDirectory() as directory:
+    e.STATE = Path(directory)
+    e.configure_amnezia(s, api)
+    before = api.call('inbounds/list')
+    e.configure_amnezia(s, api)
+    after = api.call('inbounds/list')
+    assert len(after) == 6
+    assert s['sub_ids'] == {'reality': 'only-reality-test'}
+    clients = [c for row in after for c in e.json_object(row['settings']).get('clients', [])]
+    assert len(clients) == 1 and clients[0]['email'] == 'User1'
+    assert clients[0]['flow'] == 'xtls-rprx-vision'
+    assert all(e.json_object(row['settings']).get('clients', []) ==
+               e.json_object(next(b for b in before if b['id'] == row['id'])['settings']).get('clients', [])
+               for row in after)
+print('PASS fresh-install policy: six inbounds, only User1 on REALITY; AWG rerun stays empty')

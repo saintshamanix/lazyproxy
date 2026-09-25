@@ -42,7 +42,7 @@ HTTP/3 in this setup. The default mode is `stream-up`.
 - Public IPv4 detection and automatic `IP.cdn-one.org` / `hyphenated-IP.cdn-one.org` domains.
 - Let's Encrypt through Certbot, automatic renewal and a deploy hook.
 - VLESS REALITY, VLESS WS, VLESS XHTTP, Trojan gRPC, Hysteria2 and AmneziaWG.
-- Inbound names: country flag and protocol. New clients: `User1`–`User6`.
+- Inbound names: country flag and protocol. Fresh installs create only `User1` on REALITY. All other inbounds start without clients; add or attach clients in the panel.
 - Independent subscriptions with the profile title **Casper area**.
 - Subscription reverse proxy with current settings discovered through the API and read-only SQLite.
 - INCY routing, Clash/Mihomo endpoints and static routing files.
@@ -156,6 +156,8 @@ Shadowrocket/INCY on a real VPS still require an installation test; CI is not th
 Sources: [Let's Encrypt IP certificates](https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability/),
 [Certbot IP support](https://letsencrypt.org/2026/03/11/shorter-certs-certbot/).
 
+Existing installations retain their clients on update; this change does not delete users or subscriptions.
+
 ## Updating an existing installation
 
 Update the installer-managed components without upgrading the panel version:
@@ -196,7 +198,7 @@ Ubuntu 22.04 and arm64 are not covered by this CI matrix.
 - WS and gRPC remain available for compatibility; Xray deprecation warnings are not hidden.
 - A UDP listener check does not prove external UDP reachability or a successful VPN handshake.
 - Compatibility of AmneziaWG `vpn://` exports with Shadowrocket is not guaranteed.
-  A separate configuration is saved to `/etc/single443/User6-AmneziaWG.conf`;
+  For legacy installations with the precreated AWG client, a separate configuration is saved to `/etc/single443/User6-AmneziaWG.conf`;
   the filename stays the same even after a client is renamed.
 - A nonzero IP Limit behind nginx requires correct forwarding of the real client IP;
   installing Fail2ban alone is insufficient.

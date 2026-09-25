@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- Fresh installations create only User1 on REALITY; all other inbounds start empty.
+- Access output and subscription diagnostics cover only seeded clients.
+- Preserve legacy installation clients and subscriptions on updates; no automatic deletions.
+
 ## 0.3.0
 
 - Optional fresh-install `--ip-tls`: public IPv4 URLs and IP SAN TLS; automatic REALITY DNS/SNI retained.

@@ -42,5 +42,5 @@ install_renew_hook
 install_maintenance
 TX_ACTIVE=no
 trap - ERR INT TERM
-log "Updated. Import the six independent subscriptions from $STATE/access.txt"
+log "Updated. Credentials and managed subscriptions: $STATE/access.txt"
 log "Backup: $BACKUP"

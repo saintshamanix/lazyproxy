@@ -14,6 +14,7 @@ s=dict(domain='web.example.com',reality_domain='reality.example.com',panel_path=
        trojan_password='not-a-real-password',hysteria_auth='not-a-real-auth',
        uuids=dict(reality='b6f091c7-53aa-4ff7-a8c4-4a0f98c78e01',ws='b6f091c7-53aa-4ff7-a8c4-4a0f98c78e02',xhttp='b6f091c7-53aa-4ff7-a8c4-4a0f98c78e03'))
 if os.environ.get('TEST_IP_TLS') == 'yes': s['domain']='93.184.216.34'
+if os.environ.get('TEST_SINGLE_CLIENT') == 'yes': s.update(seed_clients=['reality'],sub_ids={'reality':'only-reality'})
 e.CERT=str(out)+'/'
 rows=e.inbound_payloads(s)
 for r in rows:
