@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.7
+
+- Forward XHTTP from nginx to Xray over HTTP/2 using grpc_pass. The former HTTP/1.1 proxy_pass stalls stream-up traffic.
+- Preserve external TLS termination, paths, credentials and default stream-up mode.
+- Add authenticated VLESS/XHTTP transfer checks through the rendered TLS/SNI/nginx stack, including 2 MiB uploads/downloads and an optional legacy comparison (--legacy).
+
 ## 0.2.6
 
 - Accept verified stock Fail2ban sshd rules restricted to TCP/22 during firewall preflight. Preserve the existing SSH ban table.

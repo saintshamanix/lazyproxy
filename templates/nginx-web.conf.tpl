@@ -37,14 +37,12 @@ server {
         proxy_read_timeout 1h;
     }
     location ^~ @XHTTP_PATH@ {
-        proxy_pass http://127.0.0.1:10002;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header Connection "";
-        proxy_request_buffering off;
-        proxy_buffering off;
-        proxy_read_timeout 1h;
-        proxy_send_timeout 1h;
+        # Preserve HTTP/2 streaming to Xray (including stream-up uploads).
+        grpc_pass grpc://127.0.0.1:10002;
+        grpc_set_header Host $host;
+        client_body_timeout 1h;
+        grpc_read_timeout 1h;
+        grpc_send_timeout 1h;
     }
     location ^~ /@GRPC_SERVICE@/ {
         grpc_pass grpc://127.0.0.1:10003;
