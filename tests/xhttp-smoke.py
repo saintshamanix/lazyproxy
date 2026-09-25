@@ -65,6 +65,7 @@ with tempfile.TemporaryDirectory(prefix='xhttp-test-') as directory:
     try:
         subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
                         '-days', '1', '-subj', '/CN=web.example.com',
+                        '-addext', 'subjectAltName=DNS:web.example.com',
                         '-keyout', str(tmp/'privkey.pem'), '-out', str(tmp/'fullchain.pem')],
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run([sys.executable, str(ROOT/'tests/render_fixtures.py'), str(tmp),
@@ -103,9 +104,10 @@ with tempfile.TemporaryDirectory(prefix='xhttp-test-') as directory:
                 dict(address='127.0.0.1', port=443, users=[
                     dict(id=inbound['settings']['clients'][0]['id'], encryption='none')])]),
                 streamSettings=dict(network='xhttp', security='tls',
-                    tlsSettings=dict(serverName='web.example.com', alpn=['h2'], allowInsecure=True),
+                    tlsSettings=dict(serverName='web.example.com', alpn=['h2'],
+                        certificates=[dict(certificateFile=str(tmp/'fullchain.pem'), usage='verify')]),
                     xhttpSettings=inbound['streamSettings']['xhttpSettings']))])
-        # Self-signed certificate is used only in this isolated test.
+        # Trust only the generated test certificate for this isolated client.
         (tmp/'client.json').write_text(json.dumps(client))
         launch([XRAY, 'run', '-c', str(tmp/'client.json')], 'client')
         wait_port(18080)
