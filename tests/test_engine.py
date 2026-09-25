@@ -208,6 +208,33 @@ class NamingAndAmneziaTests(unittest.TestCase):
             self.assertEqual(client['totalGB'],1234)
             self.assertEqual(client['subId'],s['sub_ids'][e.CLIENT_NAMES[i]])
 
+    def test_custom_names_and_added_clients_are_preserved(self):
+        from unittest.mock import Mock
+        s=state();s['inbound_ids']={name:i+1 for i,name in enumerate(e.CLIENT_NAMES)}
+        rows=e.inbound_payloads(s)
+        for i,row in enumerate(rows):
+            row['id']=i+1
+            data=json.loads(row['settings'])
+            data['clients'][0].update(email='My client / '+str(i),limitIp=7,comment='custom')
+            data['clients'].append(dict(email='Additional '+str(i),subId='extra-'+str(i)))
+            row['settings']=data
+        before=json.loads(json.dumps(rows))
+        api=Mock();api.call.return_value=rows
+        with patch.object(e,'MANAGED_NAMES',e.CLIENT_NAMES):
+            e.rename_clients(s,api)
+            e.rename_clients(s,api)
+        self.assertEqual(rows,before)
+        self.assertTrue(all(call.args==('inbounds/list',) for call in api.call.call_args_list))
+
+    def test_ambiguous_or_missing_identity_still_fails(self):
+        s=state();s['inbound_ids']={'xhttp':3}
+        row=e.inbound_payloads(s)[2];row['id']=3
+        row['settings']=json.loads(row['settings'])
+        row['settings']['clients'].append(dict(row['settings']['clients'][0],email='other'))
+        with self.assertRaises(RuntimeError): e.managed_client(s,[row],'xhttp')
+        row['settings']['clients']=[]
+        with self.assertRaises(RuntimeError): e.managed_client(s,[row],'xhttp')
+
     def test_country_lookup_and_outage(self):
         s=state();s['ip']='1.2.3.4'
         with patch.object(e.subprocess,'check_output',return_value='{"success":true,"ip":"1.2.3.4","country_code":"DE"}'), patch.object(e,'save'):

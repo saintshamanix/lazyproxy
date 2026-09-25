@@ -238,22 +238,30 @@ def client_label(name):
     return 'User'+str(MANAGED_NAMES.index(name)+1)
 
 
+def managed_client(s, rows, name):
+    """Resolve identity by saved inbound ID and subId, never by display name."""
+    inbound_id = s.get('inbound_ids', {}).get(name)
+    sub_id = s.get('sub_ids', {}).get(name)
+    require(inbound_id is not None and bool(sub_id), 'Managed identity is missing')
+    matches = [r for r in rows if r.get('id') == inbound_id]
+    require(len(matches) == 1, 'Managed inbound missing or ambiguous')
+    row = matches[0]
+    clients = [c for c in json_object(row['settings']).get('clients', [])
+               if c.get('subId') == sub_id]
+    require(len(clients) == 1, 'Managed subscription identity is ambiguous')
+    require(isinstance(clients[0].get('email'), str) and bool(clients[0]['email']),
+            'Managed client name is missing')
+    return row, clients[0]
+
+
 def rename_clients(s, api):
-    """Rename only installer identities through the native client API."""
+    """Migrate legacy installer names; preserve user-defined client names."""
     rows = api.call('inbounds/list')
     plans = []
     for name in MANAGED_NAMES:
-        rows_for_id = [r for r in rows if r.get('id') == s['inbound_ids'].get(name)]
-        require(len(rows_for_id) == 1, 'Managed inbound missing during client rename')
-        row = rows_for_id[0]
-        clients = json_object(row['settings']).get('clients', [])
-        matches = [c for c in clients if c.get('subId') == s['sub_ids'][name]]
-        require(len(matches) == 1, 'Managed subscription identity is ambiguous')
-        client = matches[0]
+        row, client = managed_client(s, rows, name)
         target = client_label(name)
-        require(client.get('email') in (target, 'single443-'+name),
-                'Managed client was manually renamed; refusing overwrite')
-        if client['email'] == target:
+        if client['email'] != 'single443-'+name:
             continue
         require(not any(c.get('email') == target for r in rows
                         for c in json_object(r['settings']).get('clients', [])),
@@ -273,7 +281,8 @@ def rename_clients(s, api):
 
 
 def export_amnezia(s, api):
-    links = api.call('clients/links/'+client_label('amneziawg'))
+    _, client = managed_client(s, api.call('inbounds/list'), 'amneziawg')
+    links = api.call('clients/links/'+urllib.parse.quote(client['email'], safe=''))
     require(isinstance(links, list) and len(links) == 1 and links[0].startswith('vpn://'),
             'Unexpected upstream AmneziaWG export')
     validate_links(links[0].encode(), s, 'amneziawg')
@@ -408,8 +417,9 @@ def configure_amnezia(s, api):
     require(row.get('protocol') == name and row.get('port') == 51820 and row.get('enable') is True,
             'Managed AmneziaWG topology changed')
     data = json_object(row['settings'])
-    clients = [c for c in data.get('clients',[]) if c.get('email') in ('single443-amneziawg', client_label(name))]
-    require(len(clients) == 1 and clients[0].get('subId') == s['sub_ids'].get(name),
+    clients = [c for c in data.get('clients',[]) if s['sub_ids'].get(name)
+               and c.get('subId') == s['sub_ids'][name]]
+    require(len(clients) == 1,
             'Managed AmneziaWG subscription changed')
     require(all(clients[0].get(key) for key in ('privateKey','publicKey','allowedIPs'))
             and data.get('server',{}).get('privateKey'), 'Upstream did not generate AWG keys/address')

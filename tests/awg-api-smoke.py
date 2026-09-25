@@ -58,6 +58,19 @@ with tempfile.TemporaryDirectory() as tmp:
     links=api.call('clients/links/User6')
     assert isinstance(links,list) and len(links)==1
     e.validate_links(links[0].encode(),s,'amneziawg')
+    # A user rename must survive reruns and export through the native API.
+    custom = dict(renamed, email='Custom-AWG')
+    api.call('clients/update/User6', custom)
+    before_custom = e.json_object(api.call('inbounds/list')[0]['settings'])
+    e.configure_amnezia(s, api)
+    e.MANAGED_NAMES=('amneziawg',)
+    e.rename_clients(s, api)
+    e.rename_clients(s, api)
+    e.MANAGED_NAMES=original_names
+    e.export_amnezia(s, api)
+    after_custom = e.json_object(api.call('inbounds/list')[0]['settings'])
+    assert before_custom == after_custom
+    assert after_custom['clients'][0]['email'] == 'Custom-AWG'
     for attempt in range(20):
         text=e.subprocess.check_output(['ss','-H','-lnup','sport = :51820'],text=True)
         if 'x-ui' in text: break

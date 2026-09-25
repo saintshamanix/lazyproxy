@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.8
+
+- Preserve custom client names on updates; use saved inbound IDs and subIds to resolve managed identities.
+- Preserve renamed AmneziaWG clients during configuration and export; keep the export filename stable.
+- Retain rejection of missing/ambiguous identities and legacy-name collisions.
+- Document nginx reverse proxy, TLS termination, HTTP/2 XHTTP, ports, update behavior and validation limits in the Russian README.
+
 ## 0.2.7
 
 - Forward XHTTP from nginx to Xray over HTTP/2 using grpc_pass. The former HTTP/1.1 proxy_pass stalls stream-up traffic.
