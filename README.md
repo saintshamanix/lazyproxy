@@ -240,6 +240,10 @@ Upstream components retain their own licenses.
 
 ## Move AmneziaWG to a second IPv4
 
+If your VPS has an additional public IPv4 address, an optional two-IP setup is
+available: Hysteria2 uses UDP/443 on the primary IP, and AmneziaWG uses UDP/443
+on the additional IP. Install normally first, then run the migration below.
+
 On an existing managed v3.8.5 installation, configure the second IPv4 persistently
 in Ubuntu first. From an extracted current repository checkout run:
 
