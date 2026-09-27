@@ -1,5 +1,8 @@
 # Upstream reference
 
+For licensing scope, see [third-party notices](../THIRD_PARTY.md) and the
+[license review record](LICENSE_REVIEW.md).
+
 Source review recorded on 2026-09-22. References describe the reviewed upstream interfaces; they do not establish runtime compatibility with every release.
 
 ## Releases and integrity

@@ -249,8 +249,10 @@ sudo /usr/local/libexec/single443-maintenance --force
 
 [CHANGELOG](CHANGELOG.md) · [Проверки](docs/VALIDATION.md) · [Upstream](docs/UPSTREAM.md)
 
-Лицензия LazyProxy пока не выбрана: [LICENSE](LICENSE).
-Компоненты upstream сохраняют собственные лицензии.
+LazyProxy распространяется под [лицензией MIT](LICENSE): скрипты, шаблоны,
+тесты, документация и авторская подборка правил INCY.
+Скачиваемые компоненты и внешние геоданные сохраняют собственные лицензии:
+[сторонние компоненты](THIRD_PARTY.md) · [результаты проверки](docs/LICENSE_REVIEW.md).
 
 ## Перенос AmneziaWG на второй IPv4
 

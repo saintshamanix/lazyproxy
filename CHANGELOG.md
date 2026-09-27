@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Adopt MIT for LazyProxy's own code, templates, tests, documentation and owner-authored INCY rules; document third-party license boundaries and provenance review.
+
 ## 0.3.2
 
 - Add transactional secondary-IPv4 migration for embedded AWG on UDP/443, with Hysteria2 bound to the primary IPv4. Preserve peers and panel routing; persist the topology across updates.

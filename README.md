@@ -248,8 +248,10 @@ sudo /usr/local/libexec/single443-maintenance --force
 
 [CHANGELOG](CHANGELOG.md) · [Validation](docs/VALIDATION.md) · [Upstream](docs/UPSTREAM.md)
 
-A license for LazyProxy has not been selected yet: [LICENSE](LICENSE).
-Upstream components retain their own licenses.
+LazyProxy is licensed under the [MIT License](LICENSE), including its scripts,
+templates, tests, documentation and the owner's INCY routing profile.
+Separately downloaded components and remote datasets retain their own licenses:
+[third-party notices](THIRD_PARTY.md) · [license review](docs/LICENSE_REVIEW.md).
 
 ## Move AmneziaWG to a second IPv4
 
