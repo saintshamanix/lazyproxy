@@ -237,3 +237,22 @@ sudo /usr/local/libexec/single443-maintenance --force
 
 A license for LazyProxy has not been selected yet: [LICENSE](LICENSE).
 Upstream components retain their own licenses.
+
+## Move AmneziaWG to a second IPv4
+
+On an existing managed v3.8.5 installation, configure the second IPv4 persistently
+in Ubuntu first. From an extracted current repository checkout run:
+
+```bash
+sudo bash attach-secondary-ip.sh SECOND_IPV4
+```
+
+This backs up the panel, changes Hysteria2 to the primary IPv4 on UDP/443 and
+embedded AmneziaWG to the secondary IPv4 on UDP/443, preserves clients/keys and
+routing settings, and closes external UDP/51820. Both transports become IPv4-only
+listeners in this mode. The panel briefly restarts; failures trigger rollback.
+Download fresh AWG configurations from the panel (including any previously saved
+native files). Verify both protocols from an external client. The second IP is an
+entry point; this operation does not change outbound selection or the egress IP.
+Updates retain the saved split. UFW must be inactive, as with the installer.
+

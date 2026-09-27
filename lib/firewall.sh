@@ -44,9 +44,10 @@ firewall_snapshot() {
   FIREWALL_SNAPSHOT=yes
 }
 configure_firewall() {
-  log 'Applying inbound firewall: TCP 22/80/443, UDP 443/51820; IPv4 and IPv6'
+  log 'Applying managed inbound firewall (IPv4 and IPv6)'
   mkdir -p /etc/single443
   install -m 600 "$ROOT/templates/firewall.nft" /etc/single443/firewall.nft
+  helper render-firewall "$ROOT/templates/firewall.nft" /etc/single443/firewall.nft
   nft --check --file /etc/single443/firewall.nft
   cat > /etc/systemd/system/single443-firewall.service <<'UNIT'
 [Unit]
@@ -103,5 +104,5 @@ firewall_verify() {
   rm -f "$actual" "$expected"
   systemctl is-enabled --quiet single443-firewall
   systemctl is-active --quiet single443-firewall
-  log 'PASS firewall: TCP 22/80/443, UDP 443/51820; persistent IPv4/IPv6 policy'
+  log 'PASS firewall: live rules match persistent IPv4/IPv6 policy'
 }

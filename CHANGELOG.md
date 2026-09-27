@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2
+
+- Add transactional secondary-IPv4 migration for embedded AWG on UDP/443, with Hysteria2 bound to the primary IPv4. Preserve peers and panel routing; persist the topology across updates.
+- Verify exact listeners, native exports and repeat migrations against upstream 3.8.5.
+
 ## 0.3.1
 
 - Fresh installations create only User1 on REALITY; all other inbounds start empty.

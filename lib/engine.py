@@ -385,7 +385,7 @@ def inbound_payloads(s):
         stream['externalProxy'] = [dict(forceTls='same' if name in ('reality','hysteria') else 'tls',
                                         dest=s['domain'], port=443, remark=inbound_label(s, name),
                                         sni=s['reality_domain'] if name == 'reality' else s['domain'])]
-        result.append(dict(remark=inbound_label(s, name), enable=True, listen='0.0.0.0' if name=='hysteria' else '127.0.0.1',
+        result.append(dict(remark=inbound_label(s, name), enable=True, listen=(s['ip'] if s.get('secondary_ip') else '0.0.0.0') if name=='hysteria' else '127.0.0.1',
                            port=port, protocol=protocol, settings=json.dumps(settings), streamSettings=json.dumps(stream),
                            sniffing=json.dumps(dict(enabled=False, destOverride=['http','tls','quic'])),
                            allocate=json.dumps(dict(strategy='always', refresh=5, concurrency=3)), total=0, expiryTime=0))
@@ -433,6 +433,8 @@ def configure_amnezia(s, api):
     require(s.get('installed_version') == 'v3.8.5',
             'AmneziaWG adapter verified against 3x-ui v3.8.5; pin --version 3.8.5')
     name = 'amneziawg'
+    port = 443 if s.get('secondary_ip') else 51820
+    listen = s.get('secondary_ip', '0.0.0.0')
     label = inbound_label(s, name)
     rows = api.call('inbounds/list')
     saved_id = s['inbound_ids'].get(name)
@@ -440,9 +442,9 @@ def configure_amnezia(s, api):
                else row.get('remark') == label)]
     require(len(matches) <= 1, 'Ambiguous AmneziaWG inbound')
     if not matches:
-        require(not any(row.get('port') == 51820 for row in rows), 'UDP/51820 already assigned in panel')
-        occupied = subprocess.check_output(['ss','-H','-lnu','sport = :51820'], text=True)
-        require(not occupied.strip(), 'UDP/51820 already occupied')
+        require(not any(row.get('port') == port and row.get('listen') in ('', '0.0.0.0', '::', listen) for row in rows), 'AmneziaWG port/address already assigned in panel')
+        occupied = subprocess.check_output(['ss','-H','-lnu',f'sport = :{port}'], text=True)
+        require(not any(line.split()[3] in (f'0.0.0.0:{port}', f'*:{port}', f'[::]:{port}', f'{listen}:{port}') for line in occupied.splitlines()), 'AmneziaWG socket already occupied')
         seeded = name in s.get('seed_clients', MANAGED_NAMES)
         if seeded:
             s['sub_ids'].setdefault(name, secrets.token_hex(16))
@@ -450,8 +452,8 @@ def configure_amnezia(s, api):
         # address. Do not invent parameters or install a competing AWG daemon.
         client = dict(email=client_label(name), enable=True, subId=s['sub_ids'].get(name, ''),
                       totalGB=0, expiryTime=0, limitIp=0)
-        api.call('inbounds/add', dict(remark=label, enable=True, listen='0.0.0.0', port=51820,
-                 protocol='amneziawg', shareAddrStrategy='custom', shareAddr=s['domain'],
+        api.call('inbounds/add', dict(remark=label, enable=True, listen=listen, port=port,
+                 protocol='amneziawg', shareAddrStrategy='custom', shareAddr=s.get('secondary_ip', s['domain']),
                  settings=json.dumps(dict(clients=[])),
                  streamSettings='{}', sniffing='{}', allocate='{}', total=0, expiryTime=0))
         matches = [row for row in api.call('inbounds/list') if row.get('remark') == label]
@@ -461,7 +463,8 @@ def configure_amnezia(s, api):
         matches = [row for row in api.call('inbounds/list') if row.get('id') == matches[0]['id']]
         require(len(matches) == 1, 'AmneziaWG client creation could not be verified')
     row = matches[0]
-    require(row.get('protocol') == name and row.get('port') == 51820 and row.get('enable') is True,
+    require(row.get('protocol') == name and row.get('port') == port and row.get('enable') is True and
+            (not s.get('secondary_ip') or row.get('listen') == listen),
             'Managed AmneziaWG topology changed')
     data = json_object(row['settings'])
     clients = [c for c in data.get('clients',[]) if s['sub_ids'].get(name)
@@ -662,7 +665,7 @@ def validate_links(body, s, name=None):
                 'Incomplete AmneziaWG client export')
         endpoints = re.findall(r'^Endpoint\s*=\s*(.+)$', config, re.M)
         require(len(endpoints) == 1 and endpoints[0].strip() in
-                (s['domain']+':51820', s['ip']+':51820'), 'Incorrect AmneziaWG endpoint')
+                ((s['secondary_ip']+':443',) if s.get('secondary_ip') else (s['domain']+':51820', s['ip']+':51820')), 'Incorrect AmneziaWG endpoint')
         return
     managed = []
     for url in urls:
@@ -710,18 +713,20 @@ def diagnose():
             with socket.create_connection(('127.0.0.1',port),timeout=3):
                 pass
         check('local TCP '+str(port),tcp)
+    if s.get('secondary_ip'):
+        check('separate Hysteria2/AWG UDP addresses', lambda: verify_secondary_sockets(s))
     def udp():
         text=subprocess.check_output(['ss','-H','-lunp','sport = :443'],text=True)
         require('xray' in text.lower(), 'Xray is not listening on UDP/443')
     check('Hysteria2 UDP listener (not a protocol handshake)',udp)
     def awg_udp():
         for _ in range(15):
-            text = subprocess.check_output(['ss','-H','-lnup','sport = :51820'], text=True)
+            text = subprocess.check_output(['ss','-H','-lnup','sport = :'+str(443 if s.get('secondary_ip') else 51820)], text=True)
             if 'x-ui' in text:
                 return
             time.sleep(1)
-        raise RuntimeError('Panel AmneziaWG UDP/51820 listener absent')
-    check('AmneziaWG UDP/51820 listener (not a protocol handshake)', awg_udp)
+        raise RuntimeError('Panel AmneziaWG UDP listener absent')
+    check('AmneziaWG UDP listener (not a protocol handshake)', awg_udp)
     check('decoy via local SNI dispatcher',lambda: require(b'Field Notes' in curl_body(s['domain'],443,'/',address='127.0.0.1'),'Unexpected decoy'))
     check('REALITY unauthenticated TLS fallback',lambda: require(b'Field Notes' in curl_body(s['reality_domain'],443,'/',address='127.0.0.1'),'Unexpected fallback'))
     check('public decoy URL from VPS',lambda: require(b'Field Notes' in curl_body(s['domain'],443,'/'),'Unexpected decoy'))
@@ -752,6 +757,71 @@ def diagnose():
     print('Authenticated proxy handshakes, UDP reachability from another network and large uploads require client-side VPS acceptance tests; not established here.')
     require(not failures, str(len(failures))+' diagnostic checks failed')
 
+
+def secondary_preflight(s, address):
+    require(s.get('installed_version') == 'v3.8.5', 'Secondary IP requires upstream v3.8.5')
+    require(str(ipaddress.IPv4Address(address)) == address and address != s['ip'], 'Expected a distinct IPv4')
+    require(not s.get('secondary_ip') or s['secondary_ip'] == address, 'Another secondary IP is already configured')
+    interfaces = json.loads(subprocess.check_output(['ip', '-j', '-4', 'address', 'show'], text=True))
+    local = {a['local'] for i in interfaces for a in i.get('addr_info', [])}
+    require({s['ip'], address} <= local, 'Both public IPv4 addresses must already be configured in Ubuntu')
+    rows = API(s).call('inbounds/list')
+    for name, protocol in [('hysteria', 'hysteria'), ('amneziawg', 'amneziawg')]:
+        matches = [r for r in rows if r['id'] == s.get('inbound_ids', {}).get(name)]
+        require(len(matches) == 1 and matches[0]['protocol'] == protocol and matches[0]['enable'],
+                'Missing/disabled managed '+name+' inbound')
+    return rows
+
+
+def wait_udp(address, port, process):
+    for _ in range(30):
+        output = subprocess.check_output(['ss', '-H', '-lnup', 'sport = :'+str(port)], text=True)
+        if any(line.split()[3] == f'{address}:{port}' and process in line for line in output.splitlines()):
+            return
+        time.sleep(1)
+    raise RuntimeError(f'{process} did not bind {address}:{port}')
+
+
+def verify_secondary_sockets(s):
+    wait_udp(s['ip'], 443, 'xray')
+    wait_udp(s['secondary_ip'], 443, 'x-ui')
+    output = subprocess.check_output(['ss', '-H', '-lnup', 'sport = :443'], text=True)
+    require(not any(line.split()[3] in ('*:443', '0.0.0.0:443', '[::]:443')
+                    for line in output.splitlines()), 'Wildcard UDP/443 remains')
+
+
+def attach_secondary(address):
+    s = load()
+    rows = secondary_preflight(s, address)
+    api = API(s)
+    originals = {name: next(r for r in rows if r['id'] == s['inbound_ids'][name])
+                 for name in ('hysteria', 'amneziawg')}
+    # Release the wildcard UDP socket before moving AWG onto the same port.
+    hy = originals['hysteria']
+    api.call('inbounds/update/'+str(hy['id']), dict(hy, listen=s['ip']))
+    api.call('server/restartXrayService', {})
+    wait_udp(s['ip'], 443, 'xray')
+    awg = originals['amneziawg']
+    api.call('inbounds/update/'+str(awg['id']), dict(awg, listen=address, port=443,
+             shareAddrStrategy='custom', shareAddr=address))
+    desired = dict(s, secondary_ip=address)
+    verify_secondary_sockets(desired)
+    after = api.call('inbounds/list')
+    for name, old in originals.items():
+        new = next(r for r in after if r['id'] == old['id'])
+        for field in ('settings', 'streamSettings', 'sniffing'):
+            require(json_object(new[field]) == json_object(old[field]),
+                    name+' '+field+' unexpectedly changed; rollback required')
+    # Validate exports for every existing AWG peer, including manually created ones.
+    for client in json_object(awg['settings']).get('clients', []):
+        links = api.call('clients/links/'+urllib.parse.quote(client['email'], safe=''))
+        vpn = [link for link in links if link.startswith('vpn://')]
+        require(len(vpn) == 1, 'AWG client has ambiguous native exports')
+        validate_links(vpn[0].encode(), desired, 'amneziawg')
+    save(desired)
+    print('Secondary IP saved; client keys and inbound routing settings preserved')
+
+
 def main():
     command=sys.argv[1]
     if command=='init': init()
@@ -761,6 +831,16 @@ def main():
     elif command=='configure-panel': configure_panel()
     elif command=='discover': discover()
     elif command=='inbounds': inbounds()
+    elif command=='secondary-preflight': secondary_preflight(load(), sys.argv[2])
+    elif command=='attach-secondary': attach_secondary(sys.argv[2])
+    elif command=='secondary-verify': verify_secondary_sockets(load())
+    elif command=='render-firewall':
+        s = load()
+        text = Path(sys.argv[2]).read_text()
+        if s.get('secondary_ip'):
+            ipaddress.IPv4Address(s['secondary_ip'])
+            text = text.replace('udp dport { 443, 51820 }', 'udp dport { 443 }')
+        Path(sys.argv[3]).write_text(text)
     elif command=='render': render(sys.argv[2])
     elif command=='diagnose': diagnose()
     elif command=='verify-release':
