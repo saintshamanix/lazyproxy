@@ -8,6 +8,8 @@ stays in the original 3x-ui panel.
 
 ## Architecture
 
+**Default setup: one public IP.**
+
 ```text
 Internet
 ├── TCP/80  → nginx: ACME HTTP-01 and HTTPS redirect
@@ -24,14 +26,25 @@ Internet
 └── UDP/51820 → AmneziaWG
 ```
 
+**Optional setup: two public IPv4 addresses on the same VPS.**
+
+```text
+Internet
+├── IP1 (primary):443/UDP    → Hysteria2
+└── IP2 (additional):443/UDP → AmneziaWG
+```
+
+The TCP/nginx paths above remain unchanged. After migration, UDP/51820 is closed
+and both UDP listeners are IPv4-only. See [migration instructions](#move-amneziawg-to-a-second-ipv4).
+
 **nginx terminates TLS for the website, panel, subscriptions, WS, XHTTP and gRPC.**
 The nginx → Xray connection for WS/XHTTP/gRPC uses loopback without TLS.
 “Security: None” for these panel inbounds is therefore expected; clients connect
 using TLS on external port 443.
 
 REALITY passes through the SNI dispatcher without TLS termination in nginx stream.
-Hysteria2 uses UDP/443 directly. AmneziaWG requires a separate UDP/51820 port,
-which is an exception to the shared port 443 architecture.
+Hysteria2 uses UDP/443 directly. With one public IP, AmneziaWG uses UDP/51820.
+With an additional public IPv4, both can use UDP/443 on separate addresses.
 
 XHTTP uses `grpc_pass` over HTTP/2. The directive name does not change the inbound
 protocol: it remains VLESS XHTTP. Clients need ALPN `h2`; nginx does not serve
