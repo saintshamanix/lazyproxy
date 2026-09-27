@@ -810,7 +810,10 @@ def attach_secondary(address):
     for name, old in originals.items():
         new = next(r for r in after if r['id'] == old['id'])
         for field in ('settings', 'streamSettings', 'sniffing'):
-            require(json_object(new[field]) == json_object(old[field]),
+            # AWG has nullable stream/sniffing JSON; preserve null as well as objects.
+            before = json.loads(old[field]) if isinstance(old[field], str) and old[field] else old[field]
+            current = json.loads(new[field]) if isinstance(new[field], str) and new[field] else new[field]
+            require(current == before,
                     name+' '+field+' unexpectedly changed; rollback required')
     # Validate exports for every existing AWG peer, including manually created ones.
     for client in json_object(awg['settings']).get('clients', []):
@@ -834,6 +837,16 @@ def main():
     elif command=='secondary-preflight': secondary_preflight(load(), sys.argv[2])
     elif command=='attach-secondary': attach_secondary(sys.argv[2])
     elif command=='secondary-verify': verify_secondary_sockets(load())
+    elif command=='wait-addresses':
+        s = load()
+        for attempt in range(60):
+            interfaces = json.loads(subprocess.check_output(['ip', '-j', '-4', 'address', 'show'], text=True))
+            local = {a['local'] for i in interfaces for a in i.get('addr_info', [])}
+            if {s['ip'], s.get('secondary_ip', s['ip'])} <= local:
+                break
+            time.sleep(1)
+        else:
+            raise RuntimeError('Required IPv4 addresses unavailable; refusing wildcard fallback')
     elif command=='render-firewall':
         s = load()
         text = Path(sys.argv[2]).read_text()

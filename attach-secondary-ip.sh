@@ -24,14 +24,22 @@ configure_firewall
 nft -s list table inet single443 > "$STATE/firewall-expected.txt"
 firewall_verify
 helper secondary-verify
-# Confirm the saved addresses survive a panel restart too.
-systemctl restart x-ui
-helper wait-panel
-helper secondary-verify
 nginx -t
 if [[ $(realpath "$ROOT") != /opt/single443 ]]; then
   cp -a "$ROOT/." /opt/single443/
 fi
+mkdir -p /etc/systemd/system/x-ui.service.d
+cat > /etc/systemd/system/x-ui.service.d/single443-addresses.conf <<'UNIT'
+[Unit]
+Wants=network-online.target
+After=network-online.target
+[Service]
+ExecStartPre=/usr/bin/python3 /opt/single443/lib/engine.py wait-addresses
+UNIT
+systemctl daemon-reload
+systemctl restart x-ui
+helper wait-panel
+helper secondary-verify
 TX_ACTIVE=no
 trap - ERR INT TERM
 log "Completed. Download fresh AmneziaWG client configurations from the panel: endpoint $1:443."
