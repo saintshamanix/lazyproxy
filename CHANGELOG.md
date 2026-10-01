@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix fresh-install rollback with an empty AmneziaWG inbound: inspect live panel clients before requiring its UDP listener; retain strict checks for populated or invalid inbounds.
+
 - Adopt MIT for LazyProxy's own code, templates, tests, documentation and owner-authored INCY rules; document third-party license boundaries and provenance review.
 
 ## 0.3.2

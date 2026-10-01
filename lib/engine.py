@@ -687,6 +687,20 @@ def validate_links(body, s, name=None):
             require(bool(expected[key].intersection(managed)), key+' external link missing')
 
 
+def awg_listener_required(s):
+    # Inspect live panel state, not the install-time seed policy: users may
+    # have added peers since installation. Only a verified empty inbound skips.
+    rows = API(s).call('inbounds/list')
+    matches = [r for r in rows if r.get('id') == s['inbound_ids']['amneziawg']]
+    require(len(matches) == 1, 'Managed AmneziaWG inbound missing or ambiguous')
+    row = matches[0]
+    require(row.get('protocol') == 'amneziawg' and row.get('enable') is True,
+            'Managed AmneziaWG inbound disabled or changed')
+    clients = json_object(row['settings']).get('clients')
+    require(isinstance(clients, list), 'Invalid AmneziaWG clients configuration')
+    return bool(clients)
+
+
 def diagnose():
     s=load()
     failures=[]
@@ -713,8 +727,13 @@ def diagnose():
             with socket.create_connection(('127.0.0.1',port),timeout=3):
                 pass
         check('local TCP '+str(port),tcp)
+    awg_required = True
+    def awg_state():
+        nonlocal awg_required
+        awg_required = awg_listener_required(s)
+    check('AmneziaWG panel state', awg_state)
     if s.get('secondary_ip'):
-        check('separate Hysteria2/AWG UDP addresses', lambda: verify_secondary_sockets(s))
+        check('separate Hysteria2/AWG UDP addresses', lambda: verify_secondary_sockets(s, awg_required))
     def udp():
         text=subprocess.check_output(['ss','-H','-lunp','sport = :443'],text=True)
         require('xray' in text.lower(), 'Xray is not listening on UDP/443')
@@ -726,7 +745,10 @@ def diagnose():
                 return
             time.sleep(1)
         raise RuntimeError('Panel AmneziaWG UDP listener absent')
-    check('AmneziaWG UDP listener (not a protocol handshake)', awg_udp)
+    if awg_required:
+        check('AmneziaWG UDP listener (not a protocol handshake)', awg_udp)
+    else:
+        print('SKIP AmneziaWG UDP listener: verified empty inbound; upstream starts it when peers are added')
     check('decoy via local SNI dispatcher',lambda: require(b'Field Notes' in curl_body(s['domain'],443,'/',address='127.0.0.1'),'Unexpected decoy'))
     check('REALITY unauthenticated TLS fallback',lambda: require(b'Field Notes' in curl_body(s['reality_domain'],443,'/',address='127.0.0.1'),'Unexpected fallback'))
     check('public decoy URL from VPS',lambda: require(b'Field Notes' in curl_body(s['domain'],443,'/'),'Unexpected decoy'))
@@ -782,9 +804,10 @@ def wait_udp(address, port, process):
     raise RuntimeError(f'{process} did not bind {address}:{port}')
 
 
-def verify_secondary_sockets(s):
+def verify_secondary_sockets(s, awg_required=True):
     wait_udp(s['ip'], 443, 'xray')
-    wait_udp(s['secondary_ip'], 443, 'x-ui')
+    if awg_required:
+        wait_udp(s['secondary_ip'], 443, 'x-ui')
     output = subprocess.check_output(['ss', '-H', '-lnup', 'sport = :443'], text=True)
     require(not any(line.split()[3] in ('*:443', '0.0.0.0:443', '[::]:443')
                     for line in output.splitlines()), 'Wildcard UDP/443 remains')
