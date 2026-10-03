@@ -20,12 +20,6 @@ at `b001c1814b9ad0cd3674dbca546eb62d0ed41b6d`: **all four jobs passed**.
 Local regression: 51 tests, one platform-conditional skip.
 Tests also cover version detection, installer-state synchronization after a panel upgrade and legacy migration through the client API.
 
-## Operator confirmation — 2026-10-03
-
-The repository owner reported that updating to 3.9.0 through the panel completed
-without errors and that the two-IP server continued to operate normally.
-This is an operator report from an existing deployment, not an automated upgrade test or an independent traffic capture.
-
 ## Not established by these checks
 
 - Full fresh-install lifecycle, recovery under every failure and public ACME issuance/renewal.

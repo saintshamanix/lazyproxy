@@ -34,7 +34,7 @@ Source review recorded on 2026-09-22. References describe the reviewed upstream 
 
 ## Compatibility limits
 
-Source inspection and valid JSON do not replace Ubuntu runtime testing. Upstream owners can change tags and branches; unreviewed future APIs are not covered.
+Source inspection and valid JSON do not replace Ubuntu runtime testing. Upstream tags and branches can change; unreviewed future APIs are not covered.
 
 The six-inbound adapter supports 3x-ui 3.8.5 and 3.9.0; earlier source reviews of v3.7.0 do not extend that support boundary. See [release history](../CHANGELOG.md) and [validation evidence](VALIDATION.md).
 

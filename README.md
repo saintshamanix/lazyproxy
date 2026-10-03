@@ -86,7 +86,6 @@ Existing domains and TLS mode cannot be changed by rerunning the installer.
 
 **3x-ui:** use the panel's update control.
 [Upgrade to 3.9.0](docs/UPGRADE-3.9.0.md) covers both IP topologies; rerunning the installer or reattaching IP2 is unnecessary.
-The owner confirmed a successful panel-driven upgrade on a two-IP VPS.
 
 **LazyProxy components:** a separate, optional `--update-only` operation.
 It does not change the panel version. [Procedure](docs/OPERATIONS.md#lazyproxy-update).

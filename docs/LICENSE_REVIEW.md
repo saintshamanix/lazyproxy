@@ -19,8 +19,8 @@ before adding the MIT license and notices.
   x-ui-pro script and 3x-ui 3.8.5 source: 1,260 reference files; no matching
   contiguous blocks of eight nonempty, whitespace-trimmed lines totaling at
   least 160 characters were found.
-- The owner confirmed authorship of the INCY rules selection and explicitly
-  authorized publication under MIT.
+- The original INCY routing profile is included under MIT; remote datasets
+  retain their own licenses.
 - Checked the GitHub releases collection: no published releases were listed at
   review time.
 - Checked upstream license texts and documented separately downloaded software
@@ -29,9 +29,8 @@ before adding the MIT license and notices.
 ## Result and limits
 
 The review found no identified bundled third-party material requiring an
-exception to MIT for the current LazyProxy files. The previous license placeholder
-is replaced with the standard MIT text, naming the repository owner's GitHub
-handle, `saintshamanix`.
+exception to MIT for the current LazyProxy files. The repository uses the standard MIT text
+with copyright attribution to `saintshamanix`.
 
 This is a repository-scoped provenance review, not proof of worldwide originality
 or an exhaustive audit of upstream transitive dependencies. Text comparison cannot

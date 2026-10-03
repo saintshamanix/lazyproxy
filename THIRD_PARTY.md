@@ -1,8 +1,8 @@
 # Third-party components and license scope
 
 LazyProxy's own scripts, templates, tests and documentation are covered by the
-[MIT License](LICENSE). This includes the owner's INCY routing selection in
-`templates/routing/incy.json`, authorized for MIT publication.
+[MIT License](LICENSE). This includes the INCY routing profile in
+`templates/routing/incy.json`.
 
 MIT does not replace the licenses of software or datasets obtained from other
 projects. LazyProxy integrates with separately installed programs through their
@@ -42,14 +42,13 @@ this repository:
 
 Both project license files contain GPLv3. Consult their source-data attribution
 and distribution notices as well; this is not a claim that every constituent
-dataset has the same license. MIT covers the owner's selection of rules, not
-ownership of these remote datasets.
+dataset has the same license. MIT covers the routing profile's rule selection; remote datasets retain their own licenses.
 
 ## References
 
 The [upstream review](docs/UPSTREAM.md) records API and design references,
-including mozaroc/x-ui-pro. The README also links the XTLS XHTTP/nginx example
-and nginx documentation. These references do not grant rights to upstream code.
+including mozaroc/x-ui-pro. Additional references: [XTLS XHTTP/nginx example](https://github.com/XTLS/Xray-examples/blob/main/VLESS-XHTTP3-Nginx/nginx.conf)
+and [nginx gRPC documentation](https://nginx.org/en/docs/http/ngx_http_grpc_module.html). These references do not grant rights to upstream code.
 
 See the [license review record](docs/LICENSE_REVIEW.md) for scope and limitations.
 

@@ -3,7 +3,6 @@
 [README](../README.md) · [Русский](UPGRADE-3.9.0.ru.md)
 
 **Use the panel's update control.** No LazyProxy reinstall or second-IP reattachment is needed.
-The owner confirmed successful panel-driven updating and normal operation on a two-IP VPS on 2026-10-03.
 [Validation scope](VALIDATION.md).
 
 ## Procedure
