@@ -6,6 +6,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, ubuntu-26.04]
+        panel: [v3.8.5, v3.9.0]
+    env:
+      TEST_PANEL_VERSION: ${{ matrix.panel }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -37,13 +40,13 @@ jobs:
           include /tmp/single443-test/stream.conf;
           EOF
           sudo nginx -t -c /tmp/single443-test/nginx.conf
-      - name: Real upstream 3.8.5 AmneziaWG API smoke test
+      - name: Real upstream AmneziaWG API smoke test
         shell: bash
         run: |
           set -Eeuo pipefail
           mkdir -p /tmp/single443-api
-          curl -fLsS --retry 3 https://api.github.com/repos/MHSanaei/3x-ui/releases/tags/v3.8.5 -o /tmp/single443-api/release.json
-          curl -fLsS --retry 3 https://github.com/MHSanaei/3x-ui/releases/download/v3.8.5/x-ui-linux-amd64.tar.gz -o /tmp/single443-api/x-ui-linux-amd64.tar.gz
+          curl -fLsS --retry 3 https://api.github.com/repos/MHSanaei/3x-ui/releases/tags/${TEST_PANEL_VERSION} -o /tmp/single443-api/release.json
+          curl -fLsS --retry 3 https://github.com/MHSanaei/3x-ui/releases/download/${TEST_PANEL_VERSION}/x-ui-linux-amd64.tar.gz -o /tmp/single443-api/x-ui-linux-amd64.tar.gz
           python3 lib/engine.py verify-release /tmp/single443-api/x-ui-linux-amd64.tar.gz /tmp/single443-api/release.json
           tar -xzf /tmp/single443-api/x-ui-linux-amd64.tar.gz -C /tmp/single443-api
           sudo mkdir -p /etc/x-ui
@@ -54,8 +57,8 @@ jobs:
           panel_pid=$!
           trap 'sudo kill "$panel_pid" 2>/dev/null || true' EXIT
           cd "$GITHUB_WORKSPACE"
-          sudo python3 tests/awg-api-smoke.py
-          sudo python3 tests/ip-tls-api-smoke.py
+          sudo --preserve-env=TEST_PANEL_VERSION python3 tests/awg-api-smoke.py
+          sudo --preserve-env=TEST_PANEL_VERSION python3 tests/ip-tls-api-smoke.py
       - name: Validate empty non-REALITY inbounds with actual Xray
         run: |
           TEST_SINGLE_CLIENT=yes python3 tests/render_fixtures.py /tmp/single443-test AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB

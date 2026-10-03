@@ -36,4 +36,15 @@ Source review recorded on 2026-09-22. References describe the reviewed upstream 
 
 Source inspection and valid JSON do not replace Ubuntu runtime testing. Upstream owners can change tags and branches; unreviewed future APIs are not covered.
 
-The six-inbound adapter requires 3x-ui 3.8.5; earlier source reviews of v3.7.0 do not extend that support boundary. See [release history](../CHANGELOG.md) and [validation evidence](VALIDATION.md).
+The six-inbound adapter supports 3x-ui 3.8.5 and 3.9.0; earlier source reviews of v3.7.0 do not extend that support boundary. See [release history](../CHANGELOG.md) and [validation evidence](VALIDATION.md).
+
+## 3.9.0 compatibility review (2026-10-03)
+
+The [3.9.0 release](https://github.com/MHSanaei/3x-ui/releases/tag/v3.9.0)
+changes inbound updates to retain stored clients/enable. The adapter uses
+`clients/get/:email` and `clients/update/:email` for legacy subscription changes,
+with attachment preflight and post-write field verification. Existing inbound
+listen/port/shareAddr edits remain supported; secondary-IP migration preserves
+clients, stream settings and sniffing and checks both real sockets in CI.
+The upstream updater migrates WireGuard settings; LazyProxy does not rewrite
+custom outbounds. Consult the bilingual upgrade guide before panel UI updates.

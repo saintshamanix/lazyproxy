@@ -16,8 +16,7 @@ exec 9>/run/lock/single443.lock
 flock -n 9 || die 'Installer/refresh is running'
 mkdir -p /var/log/single443
 exec > >(tee -a /var/log/single443/install.log) 2>&1
-version=$(helper value installed_version)
-[[ $version == v3.8.5 ]] || die 'AmneziaWG update requires installed v3.8.5; use full install --version 3.8.5'
+helper panel-version >/dev/null
 helper discover
 firewall_preflight
 trap 'on_error "$?" "$LINENO"' ERR
@@ -25,6 +24,7 @@ trap 'on_error 130 "$LINENO"' INT TERM
 DEBIAN_FRONTEND=noninteractive apt-get update -q
 DEBIAN_FRONTEND=noninteractive apt-get install -y kmod fail2ban python3-systemd
 backup_begin
+helper sync-panel-version
 configure_bbr
 configure_iplimit
 configure_firewall

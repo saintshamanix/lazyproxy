@@ -59,7 +59,7 @@ Linux nginx, nftables and systemd checks were not executed on Darwin. The firewa
 - Import and routing behavior in the target INCY, Clash and Mihomo versions.
 - Separate Ubuntu 26.04 arm64 qualification.
 
-The original source review covered upstream v3.7.0 and v3.8.5, not every patch release in those families. The six-inbound adapter requires 3.8.5; see [upstream references](UPSTREAM.md).
+The original source review covered upstream v3.7.0 and v3.8.5, not every patch release in those families. The adapter now also targets 3.9.0; see [upstream references](UPSTREAM.md).
 
 ## Evidence boundaries
 
@@ -67,3 +67,13 @@ The original source review covered upstream v3.7.0 and v3.8.5, not every patch r
 - Empty routing placeholders do not establish a usable routing policy. The supplied INCY profile also requires client-side import and routing checks.
 - Temporary certificates and test secrets are not included in the distribution.
 - CI results establish only the checks executed at the linked revision; they do not establish full VPS acceptance.
+
+## 3.9.0 adaptation (2026-10-03)
+
+Local Python regression and Bash syntax checks cover live-version detection,
+UI-upgrade state synchronization for both IP topologies, rejected unknown versions,
+and legacy client migration via the dedicated client API. The Ubuntu CI matrix
+now runs both 3.8.5 and 3.9.0, including real API creation/reruns, one seeded REALITY
+client, AWG exports and secondary-IP migration with Hysteria2/AWG sockets.
+Check the commit's Actions results for completion; configuring CI is not a passed run.
+No production VPS panel UI upgrade or external device acceptance is claimed here.

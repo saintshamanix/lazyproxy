@@ -27,7 +27,7 @@ fi
 # shellcheck source=lib/common.sh
 source "$ROOT/lib/common.sh"
 for module in 3xui certs subscription inbounds nginx firewall tuning iplimit maintenance; do source "$ROOT/lib/$module.sh"; done
-PANEL_VERSION=latest
+PANEL_VERSION=3.9.0
 CONFIG=''
 while (($#)); do
   case $1 in
@@ -36,7 +36,7 @@ while (($#)); do
     --domain) WEB_DOMAIN=${2:?Missing WEB domain}; shift 2 ;;
     --reality-domain) REALITY_DOMAIN=${2:?Missing REALITY domain}; shift 2 ;;
     --config) CONFIG=${2:?Missing config}; shift 2 ;;
-    --help) echo 'install.sh [--version latest|3.8.5] [--config /root/config.env] [--ip-tls] [--domain web.example.com --reality-domain reality.example.com] | --update-only'; exit 0 ;;
+    --help) echo 'install.sh [--version latest|3.9.0|3.8.5] [--config /root/config.env] [--ip-tls] [--domain web.example.com --reality-domain reality.example.com] | --update-only'; exit 0 ;;
     *) die "Unknown option: $1" ;;
   esac
 done

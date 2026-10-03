@@ -13,7 +13,7 @@ binaries or source trees.
 
 | Component | Use | Upstream license reference |
 |---|---|---|
-| 3x-ui 3.8.5 | Panel release archive; upstream `setting.go` and systemd service downloaded by the installer | [GPLv3](https://github.com/MHSanaei/3x-ui/blob/v3.8.5/LICENSE) |
+| 3x-ui 3.8.5 / 3.9.0 | Panel release archive; upstream `setting.go` and systemd service downloaded by the installer | [GPLv3](https://github.com/MHSanaei/3x-ui/blob/v3.8.5/LICENSE) |
 | Xray-core 26.9.9 | Core supplied by the reviewed 3x-ui release | [MPL-2.0](https://github.com/XTLS/Xray-core/blob/v26.9.9/LICENSE) |
 | nginx | Ubuntu packages for HTTP/TLS reverse proxy and stream routing | [BSD 2-Clause](https://nginx.org/LICENSE) |
 | Certbot and ACME | Ubuntu packages; isolated 5.8.0 packages for optional IP TLS | [Apache-2.0](https://github.com/certbot/certbot/blob/v5.8.0/LICENSE.txt) |

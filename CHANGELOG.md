@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Support upstream 3.9.0 alongside 3.8.5; default fresh installations to 3.9.0.
+- Read the installed binary version after panel UI upgrades; synchronize saved state inside the managed update transaction and refuse implicit panel upgrades/downgrades.
+- Migrate legacy client subscriptions through the client API; retain manual names, HWID limits, keys and one/two-IP topology.
+- Add bilingual panel-driven upgrade/rollback instructions and test both releases in the Ubuntu CI matrix.
+
 - Fix fresh-install rollback with an empty AmneziaWG inbound: inspect live panel clients before requiring its UDP listener; retain strict checks for populated or invalid inbounds.
 
 - Adopt MIT for LazyProxy's own code, templates, tests, documentation and owner-authored INCY rules; document third-party license boundaries and provenance review.

@@ -68,8 +68,10 @@ HTTP/3 in this setup. The default mode is `stream-up`.
 Ubuntu Server 22.04, 24.04 or 26.04, systemd, root access, amd64 or arm64.
 Bootstrap requires curl, Python 3 and CA certificates.
 
-The six-protocol adapter is pinned to **3x-ui 3.8.5**. A `latest` mode exists,
-but unsupported versions are rejected; use the version pin below for reproducible installation.
+The adapter supports **3x-ui 3.9.0 and 3.8.5**; fresh installations default to **3.9.0**.
+Other versions are rejected. 3.9.0 compatibility is source-reviewed and covered by
+the CI matrix; see [validation evidence](docs/VALIDATION.md) for the distinction
+between automated checks and external VPS/client acceptance.
 
 Both automatic domain names must resolve to the VPS IP. Availability of
 `cdn-one.org` depends on its operator. The provider's external firewall must allow:
@@ -88,7 +90,7 @@ Fail2ban `sshd` jail is accepted and preserved.
 On a prepared Ubuntu VPS:
 
 ```bash
-sudo bash -c 'set -Eeuo pipefail; export INSTALLER_REPO=saintshamanix/lazyproxy INSTALLER_REF=main; f=$(mktemp); trap '\''rm -f "$f"'\'' EXIT; curl -fLsS --retry 3 "https://raw.githubusercontent.com/$INSTALLER_REPO/$INSTALLER_REF/install.sh" -o "$f"; bash "$f" --version 3.8.5'
+sudo bash -c 'set -Eeuo pipefail; export INSTALLER_REPO=saintshamanix/lazyproxy INSTALLER_REF=main; f=$(mktemp); trap '\''rm -f "$f"'\'' EXIT; curl -fLsS --retry 3 "https://raw.githubusercontent.com/$INSTALLER_REPO/$INSTALLER_REF/install.sh" -o "$f"; bash "$f" --version 3.9.0'
 ```
 
 To pin LazyProxy itself, replace `INSTALLER_REF=main` with a commit SHA.
@@ -121,7 +123,7 @@ For internationalized names, use their ASCII/Punycode form.
 For a fresh installation, replace the two example names:
 
 ```bash
-sudo bash -c 'set -Eeuo pipefail; export INSTALLER_REPO=saintshamanix/lazyproxy INSTALLER_REF=main; f=$(mktemp); trap '\''rm -f "$f"'\'' EXIT; curl -fLsS --retry 3 "https://raw.githubusercontent.com/$INSTALLER_REPO/$INSTALLER_REF/install.sh" -o "$f"; bash "$f" --version 3.8.5 --domain vpn.example.com --reality-domain reality.example.com'
+sudo bash -c 'set -Eeuo pipefail; export INSTALLER_REPO=saintshamanix/lazyproxy INSTALLER_REF=main; f=$(mktemp); trap '\''rm -f "$f"'\'' EXIT; curl -fLsS --retry 3 "https://raw.githubusercontent.com/$INSTALLER_REPO/$INSTALLER_REF/install.sh" -o "$f"; bash "$f" --version 3.9.0 --domain vpn.example.com --reality-domain reality.example.com'
 ```
 
 Alternatively, set both variables in a root-owned config file and pass
@@ -173,6 +175,12 @@ Existing installations retain their clients on update; this change does not dele
 
 ## Updating an existing installation
 
+**Updating 3x-ui from its web panel:** follow the [3.9.0 upgrade guide](docs/UPGRADE-3.9.0.md).
+The same procedure covers one IP and the optional two-IP topology. Back up before
+the database migration; preserve nginx TLS termination and each UDP listener address.
+Do not rerun the installer to upgrade or downgrade the panel.
+
+
 Update the installer-managed components without upgrading the panel version:
 
 ```bash
@@ -201,7 +209,7 @@ Installation log: `/var/log/single443/install.log`.
 Backups: `/var/backups/single443/`.
 
 CI on Ubuntu 24.04/26.04 amd64 checks Bash, ShellCheck, Python, nginx, isolated
-nftables, the real 3x-ui 3.8.5 API, and 2 MiB transfers in both directions through
+nftables, the real 3x-ui 3.8.5/3.9.0 APIs, and 2 MiB transfers in both directions through
 VLESS XHTTP + TLS + SNI dispatcher in all three modes.
 These checks do not replace external tests of a particular VPS and client application.
 Ubuntu 22.04 and arm64 are not covered by this CI matrix.
@@ -259,7 +267,7 @@ If your VPS has an additional public IPv4 address, an optional two-IP setup is
 available: Hysteria2 uses UDP/443 on the primary IP, and AmneziaWG uses UDP/443
 on the additional IP. Install normally first, then run the migration below.
 
-On an existing managed v3.8.5 installation, configure the second IPv4 persistently
+On an existing managed v3.8.5 or v3.9.0 installation, configure the second IPv4 persistently
 in Ubuntu first. From an extracted current repository checkout run:
 
 ```bash

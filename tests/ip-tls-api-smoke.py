@@ -1,4 +1,5 @@
 """Test native QR link exports on the disposable upstream CI panel."""
+import os
 import importlib.util
 import json
 from pathlib import Path
@@ -35,7 +36,7 @@ for row in api.call('inbounds/list'):
 # This disposable panel must be empty before exercising a fresh installation.
 api.call('clients/delOrphans', {})
 s.update(seed_clients=['reality'], sub_ids={'reality': 'only-reality-test'},
-         installed_version='v3.8.5', inbound_ids={})
+         installed_version=os.environ.get('TEST_PANEL_VERSION', 'v3.9.0'), inbound_ids={})
 for name, row in zip(e.CLIENT_NAMES, e.inbound_payloads(s)):
     api.call('inbounds/add', row)
 import tempfile

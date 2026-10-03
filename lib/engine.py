@@ -23,10 +23,28 @@ STATE = Path('/etc/single443')
 CERT = '/etc/letsencrypt/live/single443/'
 CLIENT_NAMES = ('reality', 'ws', 'xhttp', 'grpc', 'hysteria')
 MANAGED_NAMES = CLIENT_NAMES + ('amneziawg',)
+SUPPORTED_PANEL_VERSIONS = ('v3.8.5', 'v3.9.0')
 
 def require(ok, message):
     if not ok:
         raise RuntimeError(message)
+
+def panel_version():
+    """Use the installed binary, not stale installer state after a UI upgrade."""
+    value = subprocess.check_output(['/usr/local/x-ui/x-ui', '-v'], text=True).strip()
+    version = 'v' + value.removeprefix('v')
+    require(version in SUPPORTED_PANEL_VERSIONS, 'Unsupported live panel version: '+value)
+    return version
+
+
+def sync_panel_version():
+    s = load()
+    version = panel_version()
+    if s.get('installed_version') != version:
+        s['installed_version'] = version
+        save(s)
+    print(version)
+
 
 def write_json(path, data):
     path = Path(path)
@@ -416,13 +434,22 @@ def split_subscriptions(s, api, rows):
         client['subId'] = ids[name]
         row['settings'] = json.dumps(settings)
         plans.append(row)
+    payloads = []
     for row in plans:
-        api.call('inbounds/update/'+str(row['id']), row)
+        client = json_object(row['settings'])['clients'][0]
+        info = api.call('clients/get/'+urllib.parse.quote(client['email'], safe=''))
+        require(info.get('inboundIds') == [row['id']], 'Legacy client has additional attachments; migration refused')
+        payloads.append(dict(client, limitHwid=info['client'].get('limitHwid', 0)))
+    for client in payloads:
+        api.call('clients/update/'+urllib.parse.quote(client['email'], safe=''), client)
     verified = api.call('inbounds/list')
     for row in plans:
         actual = [x for x in verified if x.get('id') == row['id']]
         require(len(actual) == 1, 'Migration API verification failed')
-        require(json_object(actual[0]['settings']).get('clients') == json_object(row['settings'])['clients'],
+        expected = json_object(row['settings'])['clients'][0]
+        clients = json_object(actual[0]['settings']).get('clients', [])
+        require(len(clients) == 1 and all(clients[0].get(k) == v for k, v in expected.items()
+                if k not in ('updated_at', 'updatedAt', 'limitHwid')),
                 'Migration did not preserve client fields; rolling back')
     s['sub_ids'] = ids
     s.pop('sub_id', None)
@@ -430,8 +457,7 @@ def split_subscriptions(s, api, rows):
 
 
 def configure_amnezia(s, api):
-    require(s.get('installed_version') == 'v3.8.5',
-            'AmneziaWG adapter verified against 3x-ui v3.8.5; pin --version 3.8.5')
+    require(s.get('installed_version') in SUPPORTED_PANEL_VERSIONS, 'Unsupported AmneziaWG adapter version')
     name = 'amneziawg'
     port = 443 if s.get('secondary_ip') else 51820
     listen = s.get('secondary_ip', '0.0.0.0')
@@ -481,7 +507,7 @@ def configure_amnezia(s, api):
 
 def inbounds():
     s = load()
-    require(s.get('installed_version') == 'v3.8.5', 'Six-inbound adapter requires 3x-ui v3.8.5')
+    require(s.get('installed_version') in SUPPORTED_PANEL_VERSIONS, 'Unsupported panel adapter version')
     api = API(s)
     if 'private_key' not in s:
         keys = api.call('server/getNewX25519Cert')
@@ -781,7 +807,7 @@ def diagnose():
 
 
 def secondary_preflight(s, address):
-    require(s.get('installed_version') == 'v3.8.5', 'Secondary IP requires upstream v3.8.5')
+    require(s.get('installed_version') in SUPPORTED_PANEL_VERSIONS, 'Unsupported secondary-IP adapter version')
     require(str(ipaddress.IPv4Address(address)) == address and address != s['ip'], 'Expected a distinct IPv4')
     require(not s.get('secondary_ip') or s['secondary_ip'] == address, 'Another secondary IP is already configured')
     interfaces = json.loads(subprocess.check_output(['ip', '-j', '-4', 'address', 'show'], text=True))
@@ -852,6 +878,8 @@ def main():
     command=sys.argv[1]
     if command=='init': init()
     elif command=='value': print(load().get(sys.argv[2],''))
+    elif command=='panel-version': print(panel_version())
+    elif command=='sync-panel-version': sync_panel_version()
     elif command=='bootstrap-cli': bootstrap_cli()
     elif command=='wait-panel': wait_panel()
     elif command=='configure-panel': configure_panel()

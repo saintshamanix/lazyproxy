@@ -10,13 +10,19 @@ resolve_release() {
     curl -fLsS --retry 3 "https://api.github.com/repos/MHSanaei/3x-ui/releases/tags/$PANEL_VERSION" -o "$STATE/release.json"
   fi
   TAG=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["tag_name"])' "$STATE/release.json")
-  [[ $TAG == v3.8.5 ]] || die "Six-inbound AmneziaWG adapter verified for v3.8.5; pin --version 3.8.5 (requested $TAG)"
+  [[ $TAG == v3.8.5 || $TAG == v3.9.0 ]] || die "Unsupported release $TAG; use --version 3.9.0 or 3.8.5"
+  if [[ -x /usr/local/x-ui/x-ui ]]; then
+    local live
+    live=$(helper panel-version)
+    [[ $live == "$TAG" ]] || die "Panel is $live; upgrade through 3x-ui first. Installer will not replace it with $TAG"
+  fi
   export TAG ARCH
   log "Resolved upstream release $TAG ($ARCH)"
 }
 install_panel() {
   local installed
-  installed=$(helper value installed_version)
+  installed=''
+  if [[ -x /usr/local/x-ui/x-ui ]]; then installed=$(helper panel-version); fi
   if [[ $installed != "$TAG" || ! -x /usr/local/x-ui/x-ui ]]; then
     mkdir -p "$BACKUP/download" "$BACKUP/unpack"
     local asset=x-ui-linux-$ARCH.tar.gz

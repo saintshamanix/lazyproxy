@@ -205,8 +205,16 @@ class MigrationTests(unittest.TestCase):
             def __init__(self): self.writes=0
             def call(self,endpoint,data=None):
                 if endpoint=='inbounds/list': return rows
+                email = endpoint.rsplit('/', 1)[1]
+                row = next(r for r in rows if json.loads(r['settings'])['clients'][0]['email'] == email)
+                if endpoint.startswith('clients/get/'):
+                    return dict(inboundIds=[row['id']], client={'limitHwid': 3})
+                assert endpoint.startswith('clients/update/'), endpoint
+                assert data['limitHwid'] == 3
                 self.writes+=1
-                rows[int(endpoint.rsplit('/',1)[1])-1]=data
+                settings = json.loads(row['settings'])
+                settings['clients'] = [{k:v for k,v in data.items() if k != 'limitHwid'}]
+                row['settings'] = json.dumps(settings)
         api=API()
         with patch.object(e,'save'):
             e.split_subscriptions(s,api,rows)

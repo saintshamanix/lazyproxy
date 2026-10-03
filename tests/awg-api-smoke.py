@@ -1,4 +1,5 @@
-"""Run against an isolated CI 3x-ui 3.8.5 instance, never a user panel."""
+"""Run against an isolated CI supported 3x-ui instance, never a user panel."""
+import os
 import importlib.util
 import json
 import io
@@ -9,7 +10,7 @@ import time
 root=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('engine',root/'lib/engine.py')
 e=importlib.util.module_from_spec(spec);spec.loader.exec_module(e)
-s=dict(installed_version='v3.8.5',panel_path='/ci-test/',username='ci-user',password='ci-password-only',
+s=dict(installed_version=os.environ.get('TEST_PANEL_VERSION', 'v3.9.0'),panel_path='/ci-test/',username='ci-user',password='ci-password-only',
        country_code='US',domain='web.example.com',ip='127.0.0.1',sub_ids={},inbound_ids={})
 for attempt in range(30):
     try:

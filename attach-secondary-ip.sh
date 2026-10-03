@@ -11,12 +11,14 @@ exec 9>/run/lock/single443.lock
 flock -n 9 || die 'Another installer operation is running'
 mkdir -p /var/log/single443
 exec > >(tee -a /var/log/single443/install.log) 2>&1
+helper panel-version >/dev/null
 helper secondary-preflight "$1"
 firewall_preflight
 nginx -t
 trap 'on_error "$?" "$LINENO"' ERR
 trap 'on_error 130 "$LINENO"' INT TERM
 backup_begin
+helper sync-panel-version
 systemctl start x-ui
 helper wait-panel
 helper attach-secondary "$1"

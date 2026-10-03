@@ -69,8 +69,10 @@ HTTP/3 nginx здесь не обслуживает. Режим по умолч�
 Ubuntu Server 22.04, 24.04 или 26.04, systemd, root, amd64 или arm64.
 Для bootstrap необходимы curl, Python 3 и CA certificates.
 
-Адаптер шести протоколов привязан к **3x-ui 3.8.5**. Режим `latest` существует,
-но неподдерживаемая версия будет отклонена; для воспроизводимой установки используйте pin ниже.
+Адаптер поддерживает **3x-ui 3.9.0 и 3.8.5**; новая установка по умолчанию — **3.9.0**.
+Остальные версии отклоняются. Совместимость 3.9.0 проверяется по исходникам и в CI;
+[границы проверки](docs/VALIDATION.md) отделяют автоматические тесты от проверки
+на конкретном VPS и клиентском устройстве.
 
 Оба автодомена должны разрешаться в IP VPS. Доступность DNS-сервиса `cdn-one.org`
 зависит от его владельца. Внешний firewall провайдера должен пропускать:
@@ -89,7 +91,7 @@ Installer управляет локальным firewall. Неизвестные
 На подготовленном Ubuntu VPS:
 
 ```bash
-sudo bash -c 'set -Eeuo pipefail; export INSTALLER_REPO=saintshamanix/lazyproxy INSTALLER_REF=main; f=$(mktemp); trap '\''rm -f "$f"'\'' EXIT; curl -fLsS --retry 3 "https://raw.githubusercontent.com/$INSTALLER_REPO/$INSTALLER_REF/install.sh" -o "$f"; bash "$f" --version 3.8.5'
+sudo bash -c 'set -Eeuo pipefail; export INSTALLER_REPO=saintshamanix/lazyproxy INSTALLER_REF=main; f=$(mktemp); trap '\''rm -f "$f"'\'' EXIT; curl -fLsS --retry 3 "https://raw.githubusercontent.com/$INSTALLER_REPO/$INSTALLER_REF/install.sh" -o "$f"; bash "$f" --version 3.9.0'
 ```
 
 Для фиксации версии самого LazyProxy замените `INSTALLER_REF=main` на SHA коммита.
@@ -122,7 +124,7 @@ TCP/80 нужен для Let's Encrypt HTTP-01 и продления. Certbot п
 Для чистой установки замените два имени в примере:
 
 ```bash
-sudo bash -c 'set -Eeuo pipefail; export INSTALLER_REPO=saintshamanix/lazyproxy INSTALLER_REF=main; f=$(mktemp); trap '\''rm -f "$f"'\'' EXIT; curl -fLsS --retry 3 "https://raw.githubusercontent.com/$INSTALLER_REPO/$INSTALLER_REF/install.sh" -o "$f"; bash "$f" --version 3.8.5 --domain vpn.example.com --reality-domain reality.example.com'
+sudo bash -c 'set -Eeuo pipefail; export INSTALLER_REPO=saintshamanix/lazyproxy INSTALLER_REF=main; f=$(mktemp); trap '\''rm -f "$f"'\'' EXIT; curl -fLsS --retry 3 "https://raw.githubusercontent.com/$INSTALLER_REPO/$INSTALLER_REF/install.sh" -o "$f"; bash "$f" --version 3.9.0 --domain vpn.example.com --reality-domain reality.example.com'
 ```
 
 Альтернатива: задайте обе переменные в принадлежащем root файле и передайте
@@ -174,6 +176,12 @@ CI проверяет IP SAN с доверенным тестовым серти
 
 ## Обновление существующей установки
 
+**Обновление 3x-ui из веб-панели:** [инструкция для 3.9.0](docs/UPGRADE-3.9.0.ru.md).
+Одинаковый порядок для одного и двух IP. Перед миграцией базы сделайте резервную копию;
+сохраните TLS на nginx и адреса UDP-входящих. Не запускайте установщик повторно
+ради обновления или отката версии панели.
+
+
 Обновление обвязки без обновления версии панели:
 
 ```bash
@@ -202,7 +210,7 @@ sudo nginx -T 2>/dev/null | grep -E '(grpc_pass|proxy_pass).*10002'
 Резервные копии: `/var/backups/single443/`.
 
 CI на Ubuntu 24.04/26.04 amd64 проверяет Bash, ShellCheck, Python, nginx,
-изолированный nftables, реальный API 3x-ui 3.8.5 и передачу по 2 МиБ в обе
+изолированный nftables, реальные API 3x-ui 3.8.5/3.9.0 и передачу по 2 МиБ в обе
 стороны через VLESS XHTTP + TLS + SNI dispatcher для трёх режимов.
 Эти проверки не заменяют внешние тесты конкретного VPS и приложений.
 Ubuntu 22.04 и arm64 не покрыты этой CI-матрицей.
@@ -260,7 +268,7 @@ LazyProxy распространяется под [лицензией MIT](LICEN
 установки: Hysteria2 использует UDP/443 на основном IP, а AmneziaWG — UDP/443
 на дополнительном IP. Сначала выполните обычную установку, затем перенос ниже.
 
-На существующей управляемой установке v3.8.5 сначала постоянно настройте второй
+На существующей управляемой установке v3.8.5 или v3.9.0 сначала постоянно настройте второй
 IPv4 в Ubuntu. Из распакованной актуальной версии репозитория выполните:
 
 ```bash
