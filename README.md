@@ -2,284 +2,106 @@
 
 **English** · [Русский](README.ru.md)
 
-Automatic deployment of **upstream 3x-ui behind an nginx reverse proxy** on Ubuntu VPS.
-No panel fork: LazyProxy installs and configures the components; client management
-stays in the original 3x-ui panel.
+Deploy **3x-ui behind an nginx reverse proxy** on an Ubuntu VPS.
+LazyProxy configures TLS, inbounds, subscriptions and nftables; clients are managed in the upstream panel.
+
+**Protocols:** VLESS REALITY, VLESS WS, VLESS XHTTP, Trojan gRPC, Hysteria2 and AmneziaWG.
+A fresh install creates **one client: User1 on REALITY**. Add or attach other clients in the panel.
 
 ## Architecture
 
-**Default setup: one public IP.**
-
 ```text
-Internet
-├── TCP/80  → nginx: ACME HTTP-01 and HTTPS redirect
-├── TCP/443 → nginx stream: ssl_preread / SNI dispatcher
-│   ├── REALITY SNI → Xray 127.0.0.1:8443
-│   └── WEB SNI     → nginx HTTPS 127.0.0.1:7443
-│       ├── /                 → neutral website with JavaScript
-│       ├── secret path       → panel 127.0.0.1:2053
-│       ├── subscription path → discovered subscription backend
-│       ├── WS path           → Xray 127.0.0.1:10001
-│       ├── XHTTP path        → Xray 127.0.0.1:10002 (HTTP/2)
-│       └── gRPC service      → Xray 127.0.0.1:10003 (HTTP/2)
-├── UDP/443   → Hysteria2
-└── UDP/51820 → AmneziaWG
+TCP/80  → nginx: ACME validation and HTTPS redirect
+TCP/443 → nginx SNI dispatcher
+          ├─ REALITY → Xray
+          └─ HTTPS  → nginx TLS termination
+                      ├─ website, panel and subscriptions
+                      └─ WS, XHTTP and gRPC → Xray over loopback
 ```
 
-**Optional setup: two public IPv4 addresses on the same VPS.**
-
-```text
-Internet
-├── IP1 (primary):443/UDP    → Hysteria2
-└── IP2 (additional):443/UDP → AmneziaWG
-```
-
-The TCP/nginx paths above remain unchanged. After migration, UDP/51820 is closed
-and both UDP listeners are IPv4-only. See [migration instructions](#move-amneziawg-to-a-second-ipv4).
-
-**nginx terminates TLS for the website, panel, subscriptions, WS, XHTTP and gRPC.**
-The nginx → Xray connection for WS/XHTTP/gRPC uses loopback without TLS.
-“Security: None” for these panel inbounds is therefore expected; clients connect
-using TLS on external port 443.
-
-REALITY passes through the SNI dispatcher without TLS termination in nginx stream.
-Hysteria2 uses UDP/443 directly. With one public IP, AmneziaWG uses UDP/51820.
-With an additional public IPv4, both can use UDP/443 on separate addresses.
-
-XHTTP uses `grpc_pass` over HTTP/2. The directive name does not change the inbound
-protocol: it remains VLESS XHTTP. Clients need ALPN `h2`; nginx does not serve
-HTTP/3 in this setup. The default mode is `stream-up`.
-
-## Features
-
-- Public IPv4 detection and automatic `IP.cdn-one.org` / `hyphenated-IP.cdn-one.org` domains.
-- Let's Encrypt through Certbot, automatic renewal and a deploy hook.
-- VLESS REALITY, VLESS WS, VLESS XHTTP, Trojan gRPC, Hysteria2 and AmneziaWG.
-- Inbound names: country flag and protocol. Fresh installs create only `User1` on REALITY. All other inbounds start without clients; add or attach clients in the panel.
-- Independent subscriptions with the profile title **Casper area**.
-- Subscription reverse proxy with current settings discovered through the API and read-only SQLite.
-- INCY routing, Clash/Mihomo endpoints and static routing files.
-- nftables, compatibility with stock Fail2ban SSH protection and kernel TCP BBR when supported.
-- Unlimited client IPs by default (`limitIp=0`); existing custom limits are preserved.
-- Backups, configuration validation, rollback on failure and log maintenance.
-
-## Requirements and verified versions
-
-Ubuntu Server 22.04, 24.04 or 26.04, systemd, root access, amd64 or arm64.
-Bootstrap requires curl, Python 3 and CA certificates.
-
-The adapter supports **3x-ui 3.9.0 and 3.8.5**; fresh installations default to **3.9.0**.
-Other versions are rejected. 3.9.0 compatibility is source-reviewed and covered by
-the CI matrix; see [validation evidence](docs/VALIDATION.md) for the distinction
-between automated checks and external VPS/client acceptance.
-
-Both automatic domain names must resolve to the VPS IP. Availability of
-`cdn-one.org` depends on its operator. The provider's external firewall must allow:
-
-| Transport | Ports | Purpose |
+| UDP topology | Hysteria2 | AmneziaWG |
 |---|---|---|
-| TCP | 22, 80, 443 | SSH, ACME/HTTP, HTTPS and proxy traffic |
-| UDP | 443, 51820 | Hysteria2, AmneziaWG |
+| One public IP — default | IP1:443 | IP1:51820 |
+| Two public IPv4s — optional | IP1:443 | IP2:443 |
 
-The installer manages the local firewall. Unknown active policies stop installation;
-they are not flushed automatically. A verified SSH-only chain from the stock
-Fail2ban `sshd` jail is accepted and preserved.
+With a second IP, TCP stays unchanged; UDP/51820 closes and both UDP listeners become IPv4-only.
+[Setup and limitations](docs/OPERATIONS.md).
 
-## Fresh installation
+TLS terminates at nginx for web services and WS/XHTTP/gRPC; `security: none` on their internal inbounds is expected.
+REALITY passes through nginx without TLS termination. XHTTP uses HTTP/2 (`grpc_pass`, ALPN `h2`), default mode `stream-up`.
 
-On a prepared Ubuntu VPS:
+## Requirements
+
+- Ubuntu 22.04 / 24.04 / 26.04, systemd, root, amd64 or arm64.
+- Public IPv4; provider firewall allows TCP **22, 80, 443** and UDP **443, 51820**.
+- UFW inactive: LazyProxy manages nftables. Unknown firewall policies stop installation; verified stock Fail2ban SSH rules are preserved.
+- Automatic DNS names must resolve to the VPS; their availability depends on `cdn-one.org`.
+
+Supported panel versions: **3.9.0** (default) and **3.8.5**.
+CI covers Ubuntu 24.04/26.04 amd64. [Validation](docs/VALIDATION.md).
+
+## Install
+
+Run on a fresh VPS:
 
 ```bash
-sudo bash -c 'set -Eeuo pipefail; export INSTALLER_REPO=saintshamanix/lazyproxy INSTALLER_REF=main; f=$(mktemp); trap '\''rm -f "$f"'\'' EXIT; curl -fLsS --retry 3 "https://raw.githubusercontent.com/$INSTALLER_REPO/$INSTALLER_REF/install.sh" -o "$f"; bash "$f" --version 3.9.0'
+sudo bash <<'BASH'
+set -Eeuo pipefail
+export INSTALLER_REPO=saintshamanix/lazyproxy
+export INSTALLER_REF=main
+apt-get update -q
+DEBIAN_FRONTEND=noninteractive apt-get install -y curl python3 ca-certificates
+f=$(mktemp)
+trap 'rm -f "$f"' EXIT
+curl -fLsS --retry 3 \
+  "https://raw.githubusercontent.com/$INSTALLER_REPO/$INSTALLER_REF/install.sh" -o "$f"
+bash "$f" --version 3.9.0
+BASH
 ```
 
-To pin LazyProxy itself, replace `INSTALLER_REF=main` with a commit SHA.
-See [config.example.env](config.example.env) for configuration options.
-
-After successful installation:
+Replace `INSTALLER_REF=main` with a commit SHA to pin LazyProxy.
+After installation, retrieve the panel URL and credentials:
 
 ```bash
 sudo cat /etc/single443/access.txt
 ```
 
-This file contains secret credentials. Do not publish it.
+Keep this file private. TLS certificates renew automatically.
 
-## Using your own domains
+## Installation options
 
-Provide two distinct DNS names; a domain and a subdomain, or two subdomains, work equally well:
+Append options to the `bash "$f" --version 3.9.0` line above.
 
-| Setting | Example | Purpose |
-|---|---|---|
-| `WEB_DOMAIN` / `--domain` | `vpn.example.com` | Website, panel, subscriptions, WS, XHTTP, gRPC, Hysteria2 and AWG endpoint |
-| `REALITY_DOMAIN` / `--reality-domain` | `reality.example.com` | REALITY SNI and TLS fallback |
+| Option | Configuration |
+|---|---|
+| Automatic domains | Default; no extra arguments |
+| Own domains | `--domain vpn.example.com --reality-domain reality.example.com`; two direct A records, no CDN proxy or AAAA/CNAME |
+| Public IP + TLS | `--ip-tls`; fresh installation only, still uses an automatic REALITY DNS name |
+| Second public IPv4 | Install normally, then [move AmneziaWG to IP2:443](docs/OPERATIONS.md#second-ipv4) |
 
-Create an **A record for each name pointing directly to the VPS IPv4**.
-Disable CDN proxying (for example, use DNS-only records in Cloudflare).
-This IPv4-only adapter rejects AAAA/CNAME answers; use direct A records.
-Open TCP/80 for Let's Encrypt HTTP-01 and renewal. Certbot requests one certificate
-covering both names. Supply names only, without `https://`, ports or paths.
-For internationalized names, use their ASCII/Punycode form.
+Existing domains and TLS mode cannot be changed by rerunning the installer.
+[Configuration details](docs/OPERATIONS.md) · [Configuration file](config.example.env)
 
-For a fresh installation, replace the two example names:
+## Update
 
-```bash
-sudo bash -c 'set -Eeuo pipefail; export INSTALLER_REPO=saintshamanix/lazyproxy INSTALLER_REF=main; f=$(mktemp); trap '\''rm -f "$f"'\'' EXIT; curl -fLsS --retry 3 "https://raw.githubusercontent.com/$INSTALLER_REPO/$INSTALLER_REF/install.sh" -o "$f"; bash "$f" --version 3.9.0 --domain vpn.example.com --reality-domain reality.example.com'
-```
+**3x-ui:** use the panel's update control.
+[Upgrade to 3.9.0](docs/UPGRADE-3.9.0.md) covers both IP topologies; rerunning the installer or reattaching IP2 is unnecessary.
+The owner confirmed a successful panel-driven upgrade on a two-IP VPS.
 
-Alternatively, set both variables in a root-owned config file and pass
-`--config /root/lazyproxy.env`. Config values override corresponding CLI options.
-Both names must be provided together. If neither is provided on a fresh VPS,
-the existing automatic-domain behavior applies.
+**LazyProxy components:** a separate, optional `--update-only` operation.
+It does not change the panel version. [Procedure](docs/OPERATIONS.md#lazyproxy-update).
 
-Reruns with no domain options preserve the saved names, including custom domains.
-Changing an existing installation's IP or either domain is deliberately refused:
-migrating certificates, links and client profiles requires a separate procedure.
-`--update-only` uses the saved domains and does not accept domain options.
-
-## Optional public IP + TLS mode
-
-On a **fresh VPS**, add `--ip-tls` to the installation command (or set `IP_TLS=yes`
-in the root-owned config). Default installation still uses automatic domains.
-This mode cannot be combined with `--domain` / `--reality-domain`.
-
-- Website, panel, subscription URLs and TLS proxy endpoints use the public IPv4.
-- REALITY retains `IP-with-dashes.cdn-one.org` for SNI dispatch and local TLS fallback.
-  Its A record must resolve to the VPS, so this hybrid mode still depends on that DNS name.
-- One certificate includes the public IP SAN and the REALITY DNS SAN. Public client
-  connections verify the IP certificate; certificate verification is never disabled.
-  The loopback subscription backend uses the DNS SAN with verified HTTPS.
-- Let's Encrypt IP certificates last **160 hours** and require the `shortlived` profile.
-  Certbot 5.8.0 is installed in `/opt/single443-certbot-5.8.0`; its ACME state is isolated
-  in `/etc/single443/acme` from the distribution's Certbot. TCP/80 must remain reachable.
-- `single443-acme.timer` checks renewal every six hours. After issuance it validates
-  nginx, reloads nginx and restarts x-ui to load the Hysteria2 certificate. Failed
-  reloads are retried on the next successful renewal check, even without reissuance.
-  Short-lived certificate diagnostics require at least 24 hours remaining.
-- Reruns without mode options preserve the saved mode. Changing an existing
-  installation between domain and IP modes is refused; existing profiles stay unchanged.
-
-```bash
-sudo systemctl list-timers single443-acme.timer
-sudo journalctl -u single443-acme.service --no-pager -n 50
-sudo systemctl start single443-acme.service
-```
-
-CI tests IP SAN verification with a trusted test certificate and authenticated XHTTP
-transfer through the actual nginx templates. Public ACME issuance and imports in
-Shadowrocket/INCY on a real VPS still require an installation test; CI is not that evidence.
-
-Sources: [Let's Encrypt IP certificates](https://letsencrypt.org/2026/01/15/6day-and-ip-general-availability/),
-[Certbot IP support](https://letsencrypt.org/2026/03/11/shorter-certs-certbot/).
-
-Existing installations retain their clients on update; this change does not delete users or subscriptions.
-
-## Updating an existing installation
-
-**Updating 3x-ui from its web panel:** follow the [3.9.0 upgrade guide](docs/UPGRADE-3.9.0.md).
-The same procedure covers one IP and the optional two-IP topology. Back up before
-the database migration; preserve nginx TLS termination and each UDP listener address.
-Do not rerun the installer to upgrade or downgrade the panel.
-
-
-Update the installer-managed components without upgrading the panel version:
-
-```bash
-sudo bash -c 'set -Eeuo pipefail; export INSTALLER_REPO=saintshamanix/lazyproxy INSTALLER_REF=main; f=$(mktemp); trap '\''rm -f "$f"'\'' EXIT; curl -fLsS --retry 3 "https://raw.githubusercontent.com/$INSTALLER_REPO/$INSTALLER_REF/install.sh" -o "$f"; bash "$f" --update-only'
-```
-
-Custom client names are preserved. Only legacy installer names `single443-*`
-are migrated to `UserN`. Clients are identified by their saved inbound ID and
-`subId`; a missing or ambiguous identity stops the update. Modified paths, keys
-and topology are not overwritten blindly. If you manually changed the XHTTP mode,
-restore `stream-up` before running a full update.
-
-Errors may trigger rollback, so starting the command does not mean it succeeded.
-Wait for the final `Updated.` message, then refresh the subscription in your client.
-
-## Diagnostics
+## Diagnose
 
 ```bash
 sudo bash /opt/single443/diagnose.sh
-sudo nginx -t
-sudo nginx -T 2>/dev/null | grep -E '(grpc_pass|proxy_pass).*10002'
 ```
 
-XHTTP should use `grpc_pass grpc://127.0.0.1:10002;`.
-Installation log: `/var/log/single443/install.log`.
-Backups: `/var/backups/single443/`.
+Log: `/var/log/single443/install.log` · Backups: `/var/backups/single443/`.
+Check subscriptions and actual client traffic after changes; a listening port alone does not establish connectivity.
 
-CI on Ubuntu 24.04/26.04 amd64 checks Bash, ShellCheck, Python, nginx, isolated
-nftables, the real 3x-ui 3.8.5/3.9.0 APIs, and 2 MiB transfers in both directions through
-VLESS XHTTP + TLS + SNI dispatcher in all three modes.
-These checks do not replace external tests of a particular VPS and client application.
-Ubuntu 22.04 and arm64 are not covered by this CI matrix.
+## Reference
 
-## Clients and limitations
+[Operations](docs/OPERATIONS.md) · [Validation](docs/VALIDATION.md) · [Changelog](CHANGELOG.md) · [Upstream](docs/UPSTREAM.md)
 
-- WS and gRPC remain available for compatibility; Xray deprecation warnings are not hidden.
-- A UDP listener check does not prove external UDP reachability or a successful VPN handshake.
-- Compatibility of AmneziaWG `vpn://` exports with Shadowrocket is not guaranteed.
-  For legacy installations with the precreated AWG client, a separate configuration is saved to `/etc/single443/User6-AmneziaWG.conf`;
-  the filename stays the same even after a client is renamed.
-- A nonzero IP Limit behind nginx requires correct forwarding of the real client IP;
-  installing Fail2ban alone is insufficient.
-- Static Clash/Mihomo placeholders are not a complete user routing policy.
-
-## Automatic cleanup
-
-A persistent systemd timer checks hourly and runs cleanup 72 hours after the last
-successful run. The first cleanup is due three days after installation.
-Missed cleanup runs after the server starts.
-
-Cleanup truncates active nginx `access.log` and `error.log` files while preserving
-archives, rotates the journal, vacuums it with `--vacuum-time=1d --vacuum-size=10M`,
-and runs `apt-get clean`. Active journal files can exceed 10 MiB;
-this is not a continuous disk usage cap.
-
-Package removal is disabled by default. Set `AUTO_REMOVE=yes` in
-`/etc/single443/maintenance.env` to enable `apt-get autoremove --purge -y`.
-Updates preserve this setting. Failed cleanup is retried on the next hourly check;
-cleanup already performed cannot be rolled back.
-
-```bash
-systemctl list-timers single443-maintenance.timer
-journalctl -u single443-maintenance.service
-sudo /usr/local/libexec/single443-maintenance --force
-```
-
-## Upstream and license
-
-- [MHSanaei/3x-ui](https://github.com/MHSanaei/3x-ui)
-- [XTLS/Xray-core](https://github.com/XTLS/Xray-core)
-- [XTLS XHTTP reverse proxy example](https://github.com/XTLS/Xray-examples/blob/main/VLESS-XHTTP3-Nginx/nginx.conf)
-- [nginx gRPC module](https://nginx.org/en/docs/http/ngx_http_grpc_module.html)
-
-[CHANGELOG](CHANGELOG.md) · [Validation](docs/VALIDATION.md) · [Upstream](docs/UPSTREAM.md)
-
-LazyProxy is licensed under the [MIT License](LICENSE), including its scripts,
-templates, tests, documentation and the owner's INCY routing profile.
-Separately downloaded components and remote datasets retain their own licenses:
-[third-party notices](THIRD_PARTY.md) · [license review](docs/LICENSE_REVIEW.md).
-
-## Move AmneziaWG to a second IPv4
-
-If your VPS has an additional public IPv4 address, an optional two-IP setup is
-available: Hysteria2 uses UDP/443 on the primary IP, and AmneziaWG uses UDP/443
-on the additional IP. Install normally first, then run the migration below.
-
-On an existing managed v3.8.5 or v3.9.0 installation, configure the second IPv4 persistently
-in Ubuntu first. From an extracted current repository checkout run:
-
-```bash
-sudo bash attach-secondary-ip.sh SECOND_IPV4
-```
-
-This backs up the panel, changes Hysteria2 to the primary IPv4 on UDP/443 and
-embedded AmneziaWG to the secondary IPv4 on UDP/443, preserves clients/keys and
-routing settings, and closes external UDP/51820. Both transports become IPv4-only
-listeners in this mode. The panel briefly restarts; failures trigger rollback.
-Download fresh AWG configurations from the panel (including any previously saved
-native files). Verify both protocols from an external client. The second IP is an
-entry point; this operation does not change outbound selection or the egress IP.
-Updates retain the saved split. UFW must be inactive, as with the installer.
-
+[MIT](LICENSE) for LazyProxy. Downloaded components retain their own licenses: [third-party notices](THIRD_PARTY.md).

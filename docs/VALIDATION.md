@@ -1,85 +1,45 @@
 # Validation
 
-Recorded results as of 2026-09-22. Each result applies to the stated revision and environment.
+Results apply to the stated revision and environment, not every VPS or client.
 
-## Ubuntu CI
+## Current automated baseline — 2026-10-03
 
-[Run 35711410182](https://github.com/saintshamanix/lazyproxy/actions/runs/35711410182) completed successfully for Ubuntu 24.04 and 26.04 at commit `49ed4aa39c2e8c6f4cb15eaad78ff86b43f0855b`.
+[CI run 37122851068](https://github.com/saintshamanix/lazyproxy/actions/runs/37122851068)
+at `b001c1814b9ad0cd3674dbca546eb62d0ed41b6d`: **all four jobs passed**.
 
-| Ubuntu 26.04.1 LTS environment | Version |
+| Dimension | Coverage |
 |---|---|
-| Architecture | amd64 |
-| Python | 3.14.4 |
-| nginx | 1.28.3 |
-| Certbot | 4.0.0 |
-| nftables | 1.1.6 |
-| systemd | 259.5 |
+| OS / architecture | Ubuntu 24.04 and 26.04, amd64 |
+| Panel | 3x-ui 3.8.5 and 3.9.0 |
+| Static/configuration | Bash, ShellCheck, Python, nginx, Xray |
+| Firewall | Isolated nftables policies and repeated application |
+| Panel API | Fresh creation, reruns, single REALITY client, AWG export/key preservation |
+| Two IPs | Hysteria2/AWG UDP bindings and export preservation after migration |
+| XHTTP | Authenticated TLS/SNI transfers, 2 MiB each direction, all three modes |
 
-Passed checks:
+Local regression: 51 tests, one platform-conditional skip.
+Tests also cover version detection, installer-state synchronization after a panel upgrade and legacy migration through the client API.
 
-- Installation of all installer dependencies.
-- 22 unit tests, Bash syntax and ShellCheck.
-- Isolated nftables policy and repeated-application checks.
-- Rendered nginx configuration validation with real `nginx -t`.
-- Upstream 3.8.5 AmneziaWG API creation, key preservation on rerun, client export and UDP listener checks.
+## Operator confirmation — 2026-10-03
 
-This run did not validate a complete `install.sh` deployment, systemd lifecycle, live ACME issuance, arm64 support or external VPN handshakes.
+The repository owner reported that updating to 3.9.0 through the panel completed
+without errors and that the two-IP server continued to operate normally.
+This is an operator report from an existing deployment, not an automated upgrade test or an independent traffic capture.
 
-## Historical local checks — candidate 0.1.1
+## Not established by these checks
 
-Environment: Darwin/arm64, 2026-09-22. No Ubuntu VPS was available for this local run.
+- Full fresh-install lifecycle, recovery under every failure and public ACME issuance/renewal.
+- Universal external UDP reachability, throughput or compatibility with every client application.
+- Ubuntu 22.04 or arm64 qualification in this CI matrix.
+- Live IP-certificate issuance and Shadowrocket/INCY imports in IP-TLS mode; CI uses trusted test certificates.
 
-| Check | Recorded result |
-|---|---|
-| Bash syntax | All 12 shell scripts passed `bash -n`. |
-| ShellCheck | Version 0.11.0 passed at warning severity; exclusions are listed below. |
-| Python regression tests | All 12 tests passed. |
-| Xray configuration | Xray 26.9.9, revision `52a412d`, reported `Configuration OK` for five generated inbounds. |
-| Manual shell review | Reviewed quoting, argument rejection, checked curl calls, secret handling, locking and rollback paths. |
+A socket or latency indicator is not a protocol handshake.
+Validate subscriptions, routing and real traffic on the target VPS after changes.
 
-ShellCheck exclusions:
+## Earlier evidence
 
-- `SC1090` / `SC1091`: dynamic source paths and system `os-release`.
-- `SC2034`: configuration variables consumed by other modules or Python through the environment.
-- No other warnings or errors were suppressed.
+[Run 35711410182](https://github.com/saintshamanix/lazyproxy/actions/runs/35711410182)
+at `49ed4aa39c2e8c6f4cb15eaad78ff86b43f0855b` passed on Ubuntu 24.04/26.04.
+Detailed historical results remain in [the previous validation record](https://github.com/saintshamanix/lazyproxy/blob/4141c5e988fec816de2cfe7545a3fe873a9556c3/docs/VALIDATION.md).
 
-Regression coverage included nonstandard SQLite tables and column ordering, read-only access, ambiguous or unknown schemas, arbitrary port/path/Host rendering, TLS SNI and CA verification, incomplete TLS pairs, path injection and collisions, external-port validation, HTML profile rejection and Base64 subscription decoding.
-
-The manual review also covered the absence of database text execution through `eval`/`source`, `umask`, root-only state, `flock`, ERR/INT/TERM rollback, `nginx -t` before reload, secret preservation on rerun and the absence of direct SQL writes.
-
-Xray fixtures used a temporary certificate and generated X25519 keys. Fixture conversion removed panel-only `externalProxy` and client settings to match upstream configuration generation. Xray warned about REALITY listening on an internal port and deprecated WS/gRPC/Trojan transports; the external dispatcher still accepts TCP/443.
-
-Linux nginx, nftables and systemd checks were not executed on Darwin. The firewall namespace test was added to CI for rule validation, repeated application and exact allowed-port sets. The later Ubuntu run above provides the recorded Linux nginx and nftables results.
-
-## Acceptance checks still required
-
-- Complete Ubuntu installation, systemd lifecycle and rollback under failure.
-- Initial Let's Encrypt issuance and renewal for both generated domains on the target VPS; DNS availability depends on the zone owner.
-- Authenticated external client connections, throughput, large uploads and external UDP reachability.
-- Import and routing behavior in the target INCY, Clash and Mihomo versions.
-- Separate Ubuntu 26.04 arm64 qualification.
-
-The original source review covered upstream v3.7.0 and v3.8.5, not every patch release in those families. The adapter now also targets 3.9.0; see [upstream references](UPSTREAM.md).
-
-## Evidence boundaries
-
-- TCP connectivity and UDP listeners do not establish an authenticated protocol handshake.
-- Empty routing placeholders do not establish a usable routing policy. The supplied INCY profile also requires client-side import and routing checks.
-- Temporary certificates and test secrets are not included in the distribution.
-- CI results establish only the checks executed at the linked revision; they do not establish full VPS acceptance.
-
-## 3.9.0 adaptation (2026-10-03)
-
-Local Python regression and Bash syntax checks cover live-version detection,
-UI-upgrade state synchronization for both IP topologies, rejected unknown versions,
-and legacy client migration via the dedicated client API. The Ubuntu CI matrix
-now runs both 3.8.5 and 3.9.0, including real API creation/reruns, one seeded REALITY
-client, AWG exports and secondary-IP migration with Hysteria2/AWG sockets.
-Check the commit's Actions results for completion; configuring CI is not a passed run.
-No production VPS panel UI upgrade or external device acceptance is claimed here.
-
-Verified run: [37122851068](https://github.com/saintshamanix/lazyproxy/actions/runs/37122851068),
-commit `b001c1814b9ad0cd3674dbca546eb62d0ed41b6d`: all four Ubuntu/panel matrix jobs
-passed. Local regression: 51 tests, one platform-conditional skip. The real API,
-secondary-IP socket/export preservation, Xray configuration and authenticated XHTTP
-checks passed in CI. This does not establish production panel-UI upgrade acceptance.
+[Upstream references](UPSTREAM.md) · [Upgrade procedure](UPGRADE-3.9.0.md)
