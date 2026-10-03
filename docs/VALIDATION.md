@@ -77,3 +77,9 @@ now runs both 3.8.5 and 3.9.0, including real API creation/reruns, one seeded RE
 client, AWG exports and secondary-IP migration with Hysteria2/AWG sockets.
 Check the commit's Actions results for completion; configuring CI is not a passed run.
 No production VPS panel UI upgrade or external device acceptance is claimed here.
+
+Verified run: [37122851068](https://github.com/saintshamanix/lazyproxy/actions/runs/37122851068),
+commit `b001c1814b9ad0cd3674dbca546eb62d0ed41b6d`: all four Ubuntu/panel matrix jobs
+passed. Local regression: 51 tests, one platform-conditional skip. The real API,
+secondary-IP socket/export preservation, Xray configuration and authenticated XHTTP
+checks passed in CI. This does not establish production panel-UI upgrade acceptance.
