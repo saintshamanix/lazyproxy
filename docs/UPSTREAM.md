@@ -36,7 +36,7 @@ Source review recorded on 2026-09-22. References describe the reviewed upstream 
 
 Source inspection and valid JSON do not replace Ubuntu runtime testing. Upstream tags and branches can change; unreviewed future APIs are not covered.
 
-The six-inbound adapter supports 3x-ui 3.8.5 and 3.9.0; earlier source reviews of v3.7.0 do not extend that support boundary. See [release history](../CHANGELOG.md) and [validation evidence](VALIDATION.md).
+The adapter retains six inbounds on 3.8.5/3.9.0 and adds MASQUE on 3.10.0+. Future stable versions undergo runtime API/configuration checks; they are not prequalified. See [release history](../CHANGELOG.md) and [validation evidence](VALIDATION.md).
 
 ## 3.9.0 compatibility review (2026-10-03)
 
@@ -48,3 +48,11 @@ listen/port/shareAddr edits remain supported; secondary-IP migration preserves
 clients, stream settings and sniffing and checks both real sockets in CI.
 The upstream updater migrates WireGuard settings; LazyProxy does not rewrite
 custom outbounds. Consult the bilingual upgrade guide before panel UI updates.
+
+## MASQUE / 3.10.0
+
+The [3.10.0 release](https://github.com/MHSanaei/3x-ui/releases/tag/v3.10.0) adds MASQUE and Xray 26.10.10.
+LazyProxy uses TLS with ALPN `h2`, a distinct SNI and a loopback listener; it does not allocate UDP/443 to MASQUE.
+The [upstream JSON exporter](https://github.com/MHSanaei/3x-ui/blob/v3.10.0/internal/sub/json_service.go) maps client email/password into `masqueSettings.user/pass` and applies the public endpoint.
+The [Xray listener](https://github.com/XTLS/Xray-core/blob/v26.10.10/transport/internet/masque/hub.go) supports HTTP/2 over TCP.
+[Setup and limitations](MASQUE.md).

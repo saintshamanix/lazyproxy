@@ -586,7 +586,7 @@ def inbounds():
     candidate = api.call('server/getConfigJson')
     require(isinstance(candidate, dict) and 'inbounds' in candidate, 'No generated Xray config from API')
     write_json(STATE/'candidate-xray.json', candidate)
-    binaries = list((XRAY_DIR/'bin').glob('xray-linux-*'))
+    binaries = list(Path('/usr/local/x-ui/bin').glob('xray-linux-*'))
     require(len(binaries) == 1, 'Ambiguous Xray binary')
     env = dict(os.environ, XRAY_LOCATION_ASSET='/usr/local/x-ui/bin')
     result = subprocess.run([str(binaries[0]), 'run', '-test', '-config', str(STATE/'candidate-xray.json')], env=env, cwd='/usr/local/x-ui', stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -1018,12 +1018,19 @@ def verify_masque():
     s = load()
     name = domain(s['masque_domain'])
     # Test the public SNI dispatch locally with real certificate verification.
-    result = subprocess.run(['openssl', 's_client', '-connect', '127.0.0.1:443',
-                             '-servername', name, '-alpn', 'h2', '-verify_hostname', name,
-                             '-verify_return_error'], input=b'', stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, timeout=20)
-    require(result.returncode == 0 and b'ALPN protocol: h2' in result.stdout,
-            'MASQUE TLS/SNI/ALPN verification failed')
+    for attempt in range(5):
+        try:
+            result = subprocess.run(['openssl', 's_client', '-connect', '127.0.0.1:443',
+                                     '-servername', name, '-alpn', 'h2', '-verify_hostname', name,
+                                     '-verify_return_error'], input=b'', stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, timeout=5)
+            if result.returncode == 0 and b'ALPN protocol: h2' in result.stdout:
+                break
+        except subprocess.TimeoutExpired:
+            pass
+        if attempt == 4:
+            raise RuntimeError('MASQUE TLS/SNI/ALPN verification failed')
+        time.sleep(1)
     check_masque_row(next(x for x in API(s).call('inbounds/list')
                          if x['id'] == s['inbound_ids']['masque']), s)
 

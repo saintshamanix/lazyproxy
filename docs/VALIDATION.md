@@ -2,22 +2,23 @@
 
 Results apply to the stated revision and environment, not every VPS or client.
 
-## Current automated baseline — 2026-10-03
+## Current automated baseline — 2026-10-12
 
-[CI run 37122851068](https://github.com/saintshamanix/lazyproxy/actions/runs/37122851068)
-at `b001c1814b9ad0cd3674dbca546eb62d0ed41b6d`: **all four jobs passed**.
+[CI run 38295056533](https://github.com/saintshamanix/lazyproxy/actions/runs/38295056533)
+at `66c78b325b77671ad21424252f0f64f19b77675d`: **all six jobs passed**.
 
 | Dimension | Coverage |
 |---|---|
 | OS / architecture | Ubuntu 24.04 and 26.04, amd64 |
-| Panel | 3x-ui 3.8.5 and 3.9.0 |
+| Panel | 3x-ui 3.8.5, 3.9.0 and 3.10.0 |
 | Static/configuration | Bash, ShellCheck, Python, nginx, Xray |
 | Firewall | Isolated nftables policies and repeated application |
 | Panel API | Fresh creation, reruns, single REALITY client, AWG export/key preservation |
 | Two IPs | Hysteria2/AWG UDP bindings and export preservation after migration |
+| MASQUE (3.10.0) | Real migration API and rerun, existing credentials retained, JSON export, authenticated TLS/SNI/h2 with 2 MiB each direction and UDP echo |
 | XHTTP | Authenticated TLS/SNI transfers, 2 MiB each direction, all three modes |
 
-Local regression: 51 tests, one platform-conditional skip.
+Local regression: 57 tests, one platform-conditional skip.
 Tests also cover version detection, installer-state synchronization after a panel upgrade and legacy migration through the client API.
 
 ## Not established by these checks
