@@ -9,7 +9,7 @@ helper() { python3 "$ROOT/lib/engine.py" "$@"; }
 preflight() {
   if [[ ! -f $STATE/state.json ]]; then
     [[ ! -e /etc/x-ui/x-ui.db && ! -e /usr/local/x-ui/x-ui ]] || die 'Existing unmanaged 3x-ui: use a clean VPS'
-    [[ -z $(ss -H -lntup '( sport = :443 or sport = :7443 or sport = :8443 or sport = :10001 or sport = :10002 or sport = :10003 or sport = :2053 or sport = :2096 )') ]] || die 'Required ports already occupied'
+    [[ -z $(ss -H -lntup '( sport = :443 or sport = :7443 or sport = :8443 or sport = :10001 or sport = :10002 or sport = :10003 or sport = :10004 or sport = :2053 or sport = :2096 )') ]] || die 'Required ports already occupied'
     [[ ! -e /etc/nginx/sites-enabled/default || -L /etc/nginx/sites-enabled/default ]] || die 'Unexpected nginx default file'
     if find /etc/nginx/sites-enabled /etc/nginx/conf.d -type f -o -type l | grep -v '/sites-enabled/default$' | grep -q .; then
       die 'Non-default nginx sites found; clean VPS required'
@@ -35,7 +35,7 @@ backup_begin() {
   BACKUP_IN_PROGRESS=yes
   systemctl stop x-ui 2>/dev/null || true
   # SQLite and WAL are copied with the owning service stopped.
-  for path in /etc/systemd/system/single443-acme.service /etc/systemd/system/single443-acme.timer /etc/single443/acme/renewal-hooks /usr/local/libexec/single443-maintenance /etc/systemd/system/single443-maintenance.service /etc/systemd/system/single443-maintenance.timer /etc/single443/maintenance.env /var/lib/single443-maintenance /etc/fail2ban /etc/sysctl.d/99-single443-bbr.conf /etc/nginx /etc/x-ui /usr/local/x-ui /etc/systemd/system/x-ui.service /etc/systemd/system/x-ui.service.d/single443-addresses.conf /var/www/single443 /etc/single443/access.txt /etc/single443/User6-AmneziaWG.conf /etc/single443/subscription.json /etc/single443/firewall.nft /etc/single443/firewall-expected.txt /etc/systemd/system/single443-firewall.service; do
+  for path in /etc/systemd/system/single443-acme.service /etc/systemd/system/single443-acme.timer /etc/single443/acme/renewal-hooks /usr/local/libexec/single443-maintenance /etc/systemd/system/single443-maintenance.service /etc/systemd/system/single443-maintenance.timer /etc/single443/maintenance.env /var/lib/single443-maintenance /etc/fail2ban /etc/sysctl.d/99-single443-bbr.conf /etc/nginx /etc/x-ui /usr/local/x-ui /etc/systemd/system/x-ui.service /etc/systemd/system/x-ui.service.d /var/www/single443 /etc/single443/access.txt /etc/single443/User6-AmneziaWG.conf /etc/single443/subscription.json /etc/single443/firewall.nft /etc/single443/firewall-expected.txt /etc/systemd/system/single443-firewall.service; do
     if [[ -e $path ]]; then
       mkdir -p "$BACKUP/root$(dirname "$path")"
       cp -a "$path" "$BACKUP/root$path"
@@ -52,7 +52,7 @@ rollback() {
   if [[ ${IP_RENEW_CHANGED:-no} == yes ]]; then systemctl stop single443-acme.timer; fi
   systemctl stop x-ui nginx 2>/dev/null || true
   if [[ ${IPLIMIT_CHANGED:-no} == yes ]]; then systemctl stop fail2ban; fi
-  for path in /etc/systemd/system/single443-acme.service /etc/systemd/system/single443-acme.timer /etc/single443/acme/renewal-hooks /usr/local/libexec/single443-maintenance /etc/systemd/system/single443-maintenance.service /etc/systemd/system/single443-maintenance.timer /etc/single443/maintenance.env /var/lib/single443-maintenance /etc/fail2ban /etc/sysctl.d/99-single443-bbr.conf /etc/nginx /etc/x-ui /usr/local/x-ui /etc/systemd/system/x-ui.service /etc/systemd/system/x-ui.service.d/single443-addresses.conf /var/www/single443 /etc/single443/access.txt /etc/single443/User6-AmneziaWG.conf /etc/single443/subscription.json /etc/single443/firewall.nft /etc/single443/firewall-expected.txt /etc/systemd/system/single443-firewall.service; do
+  for path in /etc/systemd/system/single443-acme.service /etc/systemd/system/single443-acme.timer /etc/single443/acme/renewal-hooks /usr/local/libexec/single443-maintenance /etc/systemd/system/single443-maintenance.service /etc/systemd/system/single443-maintenance.timer /etc/single443/maintenance.env /var/lib/single443-maintenance /etc/fail2ban /etc/sysctl.d/99-single443-bbr.conf /etc/nginx /etc/x-ui /usr/local/x-ui /etc/systemd/system/x-ui.service /etc/systemd/system/x-ui.service.d /var/www/single443 /etc/single443/access.txt /etc/single443/User6-AmneziaWG.conf /etc/single443/subscription.json /etc/single443/firewall.nft /etc/single443/firewall-expected.txt /etc/systemd/system/single443-firewall.service; do
     rm -rf -- "$path"
     if [[ -e $BACKUP/root$path ]]; then mkdir -p "$(dirname "$path")"; cp -a "$BACKUP/root$path" "$path"; fi
   done

@@ -8,7 +8,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, ubuntu-26.04]
-        panel: [v3.8.5, v3.9.0]
+        panel: [v3.8.5, v3.9.0, v3.10.0]
     env:
       TEST_PANEL_VERSION: ${{ matrix.panel }}
     runs-on: ${{ matrix.os }}
@@ -72,6 +72,9 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           sudo --preserve-env=TEST_PANEL_VERSION python3 tests/awg-api-smoke.py
           sudo --preserve-env=TEST_PANEL_VERSION python3 tests/ip-tls-api-smoke.py
+      - name: MASQUE API, JSON export and authenticated TCP/UDP via SNI
+        if: matrix.panel == 'v3.10.0'
+        run: sudo unshare --net python3 tests/masque-smoke.py
       - name: Validate empty non-REALITY inbounds with actual Xray
         run: |
           TEST_SINGLE_CLIENT=yes python3 tests/render_fixtures.py /tmp/single443-test AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB

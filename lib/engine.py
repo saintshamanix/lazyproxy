@@ -29,11 +29,21 @@ def require(ok, message):
     if not ok:
         raise RuntimeError(message)
 
+def supported_panel_version(value):
+    match = re.fullmatch(r'v?(\d+)\.(\d+)\.(\d+)', value)
+    return bool(match) and (tuple(map(int, match.groups())) >= (3, 10, 0) or
+                            'v'+value.removeprefix('v') in SUPPORTED_PANEL_VERSIONS)
+
+
+def has_masque(value):
+    return supported_panel_version(value) and tuple(map(int, value.removeprefix('v').split('.'))) >= (3, 10, 0)
+
+
 def panel_version():
     """Use the installed binary, not stale installer state after a UI upgrade."""
     value = subprocess.check_output(['/usr/local/x-ui/x-ui', '-v'], text=True).strip()
     version = 'v' + value.removeprefix('v')
-    require(version in SUPPORTED_PANEL_VERSIONS, 'Unsupported live panel version: '+value)
+    require(supported_panel_version(version), 'Unsupported live panel version: '+value)
     return version
 
 
@@ -457,7 +467,7 @@ def split_subscriptions(s, api, rows):
 
 
 def configure_amnezia(s, api):
-    require(s.get('installed_version') in SUPPORTED_PANEL_VERSIONS, 'Unsupported AmneziaWG adapter version')
+    require(supported_panel_version(s.get('installed_version', '')), 'Unsupported AmneziaWG adapter version')
     name = 'amneziawg'
     port = 443 if s.get('secondary_ip') else 51820
     listen = s.get('secondary_ip', '0.0.0.0')
@@ -507,7 +517,7 @@ def configure_amnezia(s, api):
 
 def inbounds():
     s = load()
-    require(s.get('installed_version') in SUPPORTED_PANEL_VERSIONS, 'Unsupported panel adapter version')
+    require(supported_panel_version(s.get('installed_version', '')), 'Unsupported panel adapter version')
     api = API(s)
     if 'private_key' not in s:
         keys = api.call('server/getNewX25519Cert')
@@ -614,7 +624,8 @@ def render(templates):
     d = json.loads((STATE/'subscription.json').read_text())
     replacements = {'DOMAIN':s['domain'], 'REALITY_DOMAIN':s['reality_domain'], 'PANEL_PATH':s['panel_path'],
                     'WS_PATH':s['ws_path'], 'XHTTP_PATH':s['xhttp_path'], 'GRPC_SERVICE':s['grpc_service'],
-                    'CERT_DIR':certificate_dir(s), 'SUB_LOCATIONS':sub_locations(d)}
+                    'CERT_DIR':certificate_dir(s), 'SUB_LOCATIONS':sub_locations(d),
+                    'MASQUE_ROUTE':masque_route(s)}
     for source, target in [('nginx-stream.conf.tpl','/etc/nginx/single443-stream.conf'),
                            ('nginx-web.conf.tpl','/etc/nginx/conf.d/single443-web.conf')]:
         text = (Path(templates)/source).read_text()
@@ -807,7 +818,7 @@ def diagnose():
 
 
 def secondary_preflight(s, address):
-    require(s.get('installed_version') in SUPPORTED_PANEL_VERSIONS, 'Unsupported secondary-IP adapter version')
+    require(supported_panel_version(s.get('installed_version', '')), 'Unsupported secondary-IP adapter version')
     require(str(ipaddress.IPv4Address(address)) == address and address != s['ip'], 'Expected a distinct IPv4')
     require(not s.get('secondary_ip') or s['secondary_ip'] == address, 'Another secondary IP is already configured')
     interfaces = json.loads(subprocess.check_output(['ip', '-j', '-4', 'address', 'show'], text=True))
@@ -874,10 +885,131 @@ def attach_secondary(address):
     print('Secondary IP saved; client keys and inbound routing settings preserved')
 
 
+MASQUE_PORT = 10004
+MASQUE_CERT = '/etc/letsencrypt/live/single443-masque/'
+MASQUE_PATH = '/.well-known/masque/ip/*/*/'
+
+
+def masque_route(s):
+    if not s.get('masque_domain') or not s.get('inbound_ids', {}).get('masque'):
+        return ''
+    return f"        {domain(s['masque_domain'])} 127.0.0.1:{MASQUE_PORT};"
+
+
+def masque_prepare():
+    s = load()
+    require(has_masque(panel_version()), 'Upgrade the panel to 3.10.0 or newer first')
+    saved = s.get('masque_domain')
+    name = domain(os.environ.get('MASQUE_DOMAIN') or saved or
+                  'masque.'+s['ip']+'.'+domain(os.environ.get('AUTO_DOMAIN_SUFFIX', 'cdn-one.org')))
+    require(not saved or saved == name, 'Changing an existing MASQUE domain requires manual migration')
+    require(name not in (s['domain'], s['reality_domain']), 'MASQUE requires a distinct SNI name')
+    require({x[4][0] for x in socket.getaddrinfo(name, None, socket.AF_INET)} == {s['ip']},
+            'MASQUE DNS A must point exclusively to IP1; set --masque-domain')
+    require(not subprocess.check_output(['dig', '+short', 'AAAA', name], text=True).strip(),
+            'MASQUE DNS must have no AAAA/CNAME records')
+    api = API(s)
+    rows = api.call('inbounds/list')
+    saved_id = s.get('inbound_ids', {}).get('masque')
+    conflicts = [x for x in rows if x.get('port') == MASQUE_PORT and x.get('id') != saved_id]
+    require(not conflicts, 'MASQUE backend port 10004 is already assigned')
+    if not saved_id:
+        require(not subprocess.check_output(['ss', '-H', '-lntup', 'sport = :10004'], text=True).strip(),
+                'MASQUE backend socket 10004 is occupied')
+        require(not any(x.get('remark') == 'MASQUE' for x in rows), 'Unmanaged MASQUE inbound exists')
+    s['masque_domain'] = name
+    save(s)
+
+
+def masque_payload(s):
+    name = domain(s['masque_domain'])
+    return dict(remark='MASQUE', enable=True, listen='127.0.0.1', port=MASQUE_PORT,
+                protocol='masque', settings=json.dumps(dict(clients=[], address=['10.14.0.1/24'], mtu=1400)),
+                streamSettings=json.dumps(dict(network='masque', security='tls',
+                    masqueSettings=dict(path=MASQUE_PATH),
+                    tlsSettings=dict(serverName=name, alpn=['h2'], minVersion='1.2',
+                        certificates=[dict(certificateFile=MASQUE_CERT+'fullchain.pem',
+                                           keyFile=MASQUE_CERT+'privkey.pem')],
+                        settings=dict(serverName=name, allowInsecure=False)),
+                    externalProxy=[dict(forceTls='tls', dest=name, port=443, sni=name, remark='MASQUE')])),
+                sniffing=json.dumps(dict(enabled=False, destOverride=['http', 'tls'])),
+                allocate='{}', total=0, expiryTime=0)
+
+
+def check_masque_row(row, s):
+    require(row.get('protocol') == 'masque' and row.get('listen') == '127.0.0.1' and
+            row.get('port') == MASQUE_PORT and row.get('enable') is True, 'MASQUE topology changed')
+    stream = json_object(row['streamSettings'])
+    require(stream.get('network') == 'masque' and stream.get('security') == 'tls' and
+            stream.get('tlsSettings', {}).get('alpn') == ['h2'] and
+            stream.get('masqueSettings', {}).get('path') == MASQUE_PATH,
+            'MASQUE transport changed; refusing to overwrite')
+    expected = json_object(masque_payload(s)['streamSettings'])
+    require(stream.get('externalProxy') == expected['externalProxy'], 'MASQUE public endpoint changed')
+
+
+def configure_masque():
+    s = load()
+    require(has_masque(panel_version()), 'MASQUE requires 3.10.0 or newer')
+    require(bool(s.get('masque_domain')), 'Run MASQUE preflight first')
+    api = API(s)
+    rows = api.call('inbounds/list')
+    saved_id = s.get('inbound_ids', {}).get('masque')
+    if saved_id:
+        matches = [x for x in rows if x.get('id') == saved_id]
+        require(len(matches) == 1, 'Managed MASQUE inbound missing')
+        check_masque_row(matches[0], s)
+        return
+    require(not any(x.get('port') == MASQUE_PORT or x.get('remark') == 'MASQUE' for x in rows),
+            'MASQUE inbound conflict')
+    api.call('inbounds/add', masque_payload(s))
+    after = api.call('inbounds/list')
+    created = [x for x in after if x.get('id') not in {r['id'] for r in rows}]
+    require(len(created) == 1, 'MASQUE creation is ambiguous')
+    check_masque_row(created[0], s)
+    # Ignore live traffic counters, but ensure credentials, routing and listeners
+    # of every pre-existing inbound survive unchanged.
+    for old in rows:
+        matches = [x for x in after if x.get('id') == old['id']]
+        require(len(matches) == 1, 'Existing inbound disappeared')
+        for key in ('settings', 'streamSettings', 'sniffing', 'listen', 'port', 'protocol', 'enable'):
+            require(matches[0].get(key) == old.get(key), 'Existing inbound changed: '+key)
+    s.setdefault('inbound_ids', {})['masque'] = created[0]['id']
+    save(s)
+    candidate = api.call('server/getConfigJson')
+    require(isinstance(candidate, dict) and 'inbounds' in candidate, 'Unknown Xray config schema')
+    target = STATE/'candidate-masque.json'
+    write_json(target, candidate)
+    binaries = list(Path('/usr/local/x-ui/bin').glob('xray-linux-*'))
+    require(len(binaries) == 1, 'Ambiguous Xray binary')
+    subprocess.run([str(binaries[0]), 'run', '-test', '-config', str(target)],
+                   cwd='/usr/local/x-ui', env=dict(os.environ, XRAY_LOCATION_ASSET='/usr/local/x-ui/bin'), check=True)
+    api.call('server/restartXrayService', {})
+
+
+def verify_masque():
+    s = load()
+    name = domain(s['masque_domain'])
+    # Test the public SNI dispatch locally with real certificate verification.
+    result = subprocess.run(['openssl', 's_client', '-connect', '127.0.0.1:443',
+                             '-servername', name, '-alpn', 'h2', '-verify_hostname', name,
+                             '-verify_return_error'], input=b'', stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, timeout=20)
+    require(result.returncode == 0 and b'ALPN protocol: h2' in result.stdout,
+            'MASQUE TLS/SNI/ALPN verification failed')
+    check_masque_row(next(x for x in API(s).call('inbounds/list')
+                         if x['id'] == s['inbound_ids']['masque']), s)
+
+
 def main():
     command=sys.argv[1]
     if command=='init': init()
     elif command=='value': print(load().get(sys.argv[2],''))
+    elif command=='masque-prepare': masque_prepare()
+    elif command=='masque-add': configure_masque()
+    elif command=='masque-check': verify_masque()
+    elif command=='supported-version': require(supported_panel_version(sys.argv[2]), 'Unsupported stable version')
+    elif command=='has-masque': require(has_masque(sys.argv[2]), 'MASQUE requires 3.10.0 or newer')
     elif command=='panel-version': print(panel_version())
     elif command=='sync-panel-version': sync_panel_version()
     elif command=='bootstrap-cli': bootstrap_cli()

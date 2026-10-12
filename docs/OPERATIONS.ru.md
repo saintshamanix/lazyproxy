@@ -103,3 +103,7 @@ sudo journalctl -u x-ui --since "10 minutes ago" --no-pager
 systemctl list-timers single443-maintenance.timer
 journalctl -u single443-maintenance.service
 ```
+
+## MASQUE
+
+[HTTP/2 на TCP/443 и добавление после обновления](MASQUE.ru.md). Отдельное имя SNI направляется в Xray на loopback-порт 10004; обе схемы UDP сохраняются.

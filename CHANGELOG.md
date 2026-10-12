@@ -1,5 +1,14 @@
 # Changelog
 
+## MASQUE / 3.10.0+
+
+- Fresh installations resolve the latest stable upstream release and add an empty MASQUE inbound on 3.10.0+.
+- Add MASQUE to upgraded managed panels with `add-masque.sh`, with backup/rollback and idempotent API creation.
+- Use a separate SNI/certificate and HTTP/2 on TCP/443, preserving existing UDP and second-IP bindings.
+- Keep the single REALITY seed client; MASQUE clients use JSON subscriptions.
+- Add 3.10.0 to CI and test MASQUE API export and authenticated TCP/UDP through nginx.
+
+
 ## Unreleased
 
 - Support upstream 3.9.0 alongside 3.8.5; default fresh installations to 3.9.0.

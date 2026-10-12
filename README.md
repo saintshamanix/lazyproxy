@@ -5,7 +5,7 @@
 Deploy **3x-ui behind an nginx reverse proxy** on an Ubuntu VPS.
 LazyProxy configures TLS, inbounds, subscriptions and nftables; clients are managed in the upstream panel.
 
-**Protocols:** VLESS REALITY, VLESS WS, VLESS XHTTP, Trojan gRPC, Hysteria2 and AmneziaWG.
+**Protocols:** VLESS REALITY, VLESS WS, VLESS XHTTP, Trojan gRPC, Hysteria2, AmneziaWG and MASQUE (3.10.0+).
 A fresh install creates **one client: User1 on REALITY**. Add or attach other clients in the panel.
 
 ## Architecture
@@ -14,6 +14,7 @@ A fresh install creates **one client: User1 on REALITY**. Add or attach other cl
 TCP/80  → nginx: ACME validation and HTTPS redirect
 TCP/443 → nginx SNI dispatcher
           ├─ REALITY → Xray
+          ├─ MASQUE  → Xray TLS/h2 (127.0.0.1:10004)
           └─ HTTPS  → nginx TLS termination
                       ├─ website, panel and subscriptions
                       └─ WS, XHTTP and gRPC → Xray over loopback
@@ -37,7 +38,7 @@ REALITY passes through nginx without TLS termination. XHTTP uses HTTP/2 (`grpc_p
 - UFW inactive: LazyProxy manages nftables. Unknown firewall policies stop installation; verified stock Fail2ban SSH rules are preserved.
 - Automatic DNS names must resolve to the VPS; their availability depends on `cdn-one.org`.
 
-Supported panel versions: **3.9.0** (default) and **3.8.5**.
+Default: **latest stable upstream release**. MASQUE is created on **3.10.0+**; explicit 3.8.5/3.9.0 installs retain six inbounds. Future stable releases are accepted, but compatibility is checked during installation, not guaranteed in advance.
 CI covers Ubuntu 24.04/26.04 amd64. [Validation](docs/VALIDATION.md).
 
 ## Install
@@ -55,7 +56,7 @@ f=$(mktemp)
 trap 'rm -f "$f"' EXIT
 curl -fLsS --retry 3 \
   "https://raw.githubusercontent.com/$INSTALLER_REPO/$INSTALLER_REF/install.sh" -o "$f"
-bash "$f" --version 3.9.0
+bash "$f" --version latest
 BASH
 ```
 
@@ -70,7 +71,7 @@ Keep this file private. TLS certificates renew automatically.
 
 ## Installation options
 
-Append options to the `bash "$f" --version 3.9.0` line above.
+Append options to the `bash "$f" --version latest` line above.
 
 | Option | Configuration |
 |---|---|
@@ -81,6 +82,13 @@ Append options to the `bash "$f" --version 3.9.0` line above.
 
 Existing domains and TLS mode cannot be changed by rerunning the installer.
 [Configuration details](docs/OPERATIONS.md) · [Configuration file](config.example.env)
+
+## MASQUE
+
+HTTP/2 over TCP/443, with a separate SNI name and certificate. UDP topology is unchanged.
+Use `--masque-domain masque.example.com` for your own direct A record; otherwise `masque.IP.cdn-one.org` is used.
+The inbound starts empty. Attach clients in the panel and use **Xray JSON subscriptions** with a MASQUE-capable client.
+[Add MASQUE after a panel upgrade](docs/MASQUE.md).
 
 ## Update
 

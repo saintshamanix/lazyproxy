@@ -2,6 +2,7 @@
 stream {
     map $ssl_preread_server_name $single443_backend {
         @REALITY_DOMAIN@ 127.0.0.1:8443;
+@MASQUE_ROUTE@
         default 127.0.0.1:7443;
     }
     server {

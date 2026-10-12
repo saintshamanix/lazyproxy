@@ -96,3 +96,7 @@ enables `apt-get autoremove --purge -y`. Failed cleanup retries hourly; complete
 systemctl list-timers single443-maintenance.timer
 journalctl -u single443-maintenance.service
 ```
+
+## MASQUE
+
+[HTTP/2 on TCP/443 and post-upgrade setup](MASQUE.md). A separate SNI name routes to Xray on loopback port 10004; one-IP and two-IP UDP bindings are unchanged.

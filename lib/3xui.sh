@@ -10,7 +10,7 @@ resolve_release() {
     curl -fLsS --retry 3 "https://api.github.com/repos/MHSanaei/3x-ui/releases/tags/$PANEL_VERSION" -o "$STATE/release.json"
   fi
   TAG=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["tag_name"])' "$STATE/release.json")
-  [[ $TAG == v3.8.5 || $TAG == v3.9.0 ]] || die "Unsupported release $TAG; use --version 3.9.0 or 3.8.5"
+  helper supported-version "$TAG"
   if [[ -x /usr/local/x-ui/x-ui ]]; then
     local live
     live=$(helper panel-version)
@@ -40,6 +40,15 @@ install_panel() {
   /usr/local/x-ui/x-ui migrate
   if [[ $(helper value configured) != True ]]; then
     helper bootstrap-cli
+  fi
+  if helper has-masque "$TAG" >/dev/null 2>&1; then
+    mkdir -p /etc/systemd/system/x-ui.service.d
+    cat > /etc/systemd/system/x-ui.service.d/single443-sandbox.conf <<'UNIT'
+[Service]
+ReadWritePaths=-/etc/x-ui -/usr/local/x-ui -/var/log/x-ui -/proc/sys/net
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+UNIT
   fi
   systemctl daemon-reload
   systemctl enable x-ui

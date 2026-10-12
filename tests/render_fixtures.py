@@ -25,7 +25,7 @@ for r in rows:
     for key in ('remark','enable','total','expiryTime'):r.pop(key,None)
 (out/'xray.json').write_text(json.dumps(dict(inbounds=rows,outbounds=[dict(protocol='freedom',tag='direct')]),indent=2))
 d=dict(port=23456,host='sub.example.com',tls=True,address='127.0.0.1',paths=['/randomSub/','/randomJson/','/randomClash/'],clash_path='/randomClash/')
-values=dict(CERT_DIR=str(out)+'/',DOMAIN=s['domain'],REALITY_DOMAIN=s['reality_domain'],PANEL_PATH=s['panel_path'],WS_PATH=s['ws_path'],XHTTP_PATH=s['xhttp_path'],GRPC_SERVICE=s['grpc_service'],SUB_LOCATIONS=e.sub_locations(d))
+values=dict(MASQUE_ROUTE='',CERT_DIR=str(out)+'/',DOMAIN=s['domain'],REALITY_DOMAIN=s['reality_domain'],PANEL_PATH=s['panel_path'],WS_PATH=s['ws_path'],XHTTP_PATH=s['xhttp_path'],GRPC_SERVICE=s['grpc_service'],SUB_LOCATIONS=e.sub_locations(d))
 for kind in ('stream','web'):
     text=(root/f'templates/nginx-{kind}.conf.tpl').read_text()
     for k,v in values.items():text=text.replace('@'+k+'@',v)

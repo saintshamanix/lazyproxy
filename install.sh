@@ -26,17 +26,18 @@ if [[ ${1:-} == --update-only ]]; then
 fi
 # shellcheck source=lib/common.sh
 source "$ROOT/lib/common.sh"
-for module in 3xui certs subscription inbounds nginx firewall tuning iplimit maintenance; do source "$ROOT/lib/$module.sh"; done
-PANEL_VERSION=3.9.0
+for module in 3xui certs subscription inbounds nginx firewall tuning iplimit maintenance masque; do source "$ROOT/lib/$module.sh"; done
+PANEL_VERSION=latest
 CONFIG=''
 while (($#)); do
   case $1 in
     --version) PANEL_VERSION=${2:?Missing version}; shift 2 ;;
+    --masque-domain) MASQUE_DOMAIN=${2:?Missing MASQUE domain}; shift 2 ;;
     --ip-tls) IP_TLS=yes; shift ;;
     --domain) WEB_DOMAIN=${2:?Missing WEB domain}; shift 2 ;;
     --reality-domain) REALITY_DOMAIN=${2:?Missing REALITY domain}; shift 2 ;;
     --config) CONFIG=${2:?Missing config}; shift 2 ;;
-    --help) echo 'install.sh [--version latest|3.9.0|3.8.5] [--config /root/config.env] [--ip-tls] [--domain web.example.com --reality-domain reality.example.com] | --update-only'; exit 0 ;;
+    --help) echo 'install.sh [--version latest|VERSION] [--masque-domain masque.example.com] [--config /root/config.env] [--ip-tls] [--domain web.example.com --reality-domain reality.example.com] | --update-only'; exit 0 ;;
     *) die "Unknown option: $1" ;;
   esac
 done
@@ -47,6 +48,7 @@ if [[ -n $CONFIG ]]; then
   source "$CONFIG"
 fi
 export PANEL_VERSION AUTO_DOMAIN_SUFFIX=${AUTO_DOMAIN_SUFFIX:-cdn-one.org} PUBLIC_IPV4=${PUBLIC_IPV4:-}
+export MASQUE_DOMAIN=${MASQUE_DOMAIN:-}
 export IP_TLS=${IP_TLS:-}
 export WEB_DOMAIN=${WEB_DOMAIN:-} REALITY_DOMAIN=${REALITY_DOMAIN:-}
 export ACME_EMAIL=${ACME_EMAIL:-} ACME_STAGING=${ACME_STAGING:-no}
@@ -77,9 +79,15 @@ install_panel
 configure_panel
 configure_inbounds
 subscription_discover
+if helper has-masque "$TAG" >/dev/null 2>&1; then
+  helper masque-prepare
+  obtain_masque_cert
+  helper masque-add
+fi
 validate_xray
 render_nginx
 activate_nginx
+if [[ -n $(helper value masque_domain) ]]; then helper masque-check; fi
 if ! bash "$ROOT/diagnose.sh"; then die 'Post-install verification failed'; fi
 # Keep the installed entry points available for reruns and renewal.
 mkdir -p /opt/single443

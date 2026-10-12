@@ -9,11 +9,11 @@ e = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(e)
 
 class PanelVersionTests(unittest.TestCase):
-    def test_exact_supported_versions_only(self):
-        for value in ('3.8.5', 'v3.8.5', '3.9.0\n', 'v3.9.0'):
+    def test_stable_versions_and_future_releases(self):
+        for value in ('3.8.5', 'v3.8.5', '3.9.0\n', 'v3.9.0', '3.10.0', '3.11.2', '4.0.0'):
             with patch.object(e.subprocess, 'check_output', return_value=value):
-                self.assertIn(e.panel_version(), e.SUPPORTED_PANEL_VERSIONS)
-        for value in ('3.9.1', '3.9.0-dev', '', 'error 3.9.0'):
+                self.assertTrue(e.supported_panel_version(e.panel_version()))
+        for value in ('3.9.1', '3.9.0-dev', '3.10.0-rc1', '', 'error 3.9.0'):
             with patch.object(e.subprocess, 'check_output', return_value=value), self.assertRaises(RuntimeError):
                 e.panel_version()
 

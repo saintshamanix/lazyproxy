@@ -5,7 +5,7 @@
 Установка **3x-ui за обратным прокси nginx** на Ubuntu VPS.
 LazyProxy настраивает TLS, входящие, подписки и nftables; управление клиентами остаётся в оригинальной панели.
 
-**Протоколы:** VLESS REALITY, VLESS WS, VLESS XHTTP, Trojan gRPC, Hysteria2 и AmneziaWG.
+**Протоколы:** VLESS REALITY, VLESS WS, VLESS XHTTP, Trojan gRPC, Hysteria2, AmneziaWG и MASQUE (3.10.0+).
 Чистая установка создаёт **одного клиента — User1 на REALITY**. Остальных добавляйте или привязывайте в панели.
 
 ## Архитектура
@@ -14,6 +14,7 @@ LazyProxy настраивает TLS, входящие, подписки и nfta
 TCP/80  → nginx: проверка ACME и перенаправление на HTTPS
 TCP/443 → SNI-диспетчер nginx
           ├─ REALITY → Xray
+          ├─ MASQUE  → Xray TLS/h2 (127.0.0.1:10004)
           └─ HTTPS  → завершение TLS на nginx
                       ├─ сайт, панель и подписки
                       └─ WS, XHTTP и gRPC → Xray через loopback
@@ -37,7 +38,7 @@ REALITY проходит через nginx без завершения TLS. XHTTP
 - UFW выключен: LazyProxy управляет nftables. Неизвестные политики останавливают установку; проверенные штатные SSH-правила Fail2ban сохраняются.
 - Автодомены должны разрешаться в IP VPS; их доступность зависит от `cdn-one.org`.
 
-Поддерживаемые версии панели: **3.9.0** (по умолчанию) и **3.8.5**.
+По умолчанию — **последний стабильный релиз upstream**. На **3.10.0+** добавляется MASQUE; явная установка 3.8.5/3.9.0 сохраняет шесть входящих. Будущие стабильные версии допускаются, но совместимость проверяется при установке и заранее не гарантируется.
 CI покрывает Ubuntu 24.04/26.04 amd64. [Результаты проверок](docs/VALIDATION.md).
 
 ## Установка
@@ -55,7 +56,7 @@ f=$(mktemp)
 trap 'rm -f "$f"' EXIT
 curl -fLsS --retry 3 \
   "https://raw.githubusercontent.com/$INSTALLER_REPO/$INSTALLER_REF/install.sh" -o "$f"
-bash "$f" --version 3.9.0
+bash "$f" --version latest
 BASH
 ```
 
@@ -70,7 +71,7 @@ sudo cat /etc/single443/access.txt
 
 ## Варианты установки
 
-Добавьте параметры в строку `bash "$f" --version 3.9.0` выше.
+Добавьте параметры в строку `bash "$f" --version latest` выше.
 
 | Вариант | Настройка |
 |---|---|
@@ -81,6 +82,13 @@ sudo cat /etc/single443/access.txt
 
 Повторный запуск установщика не меняет сохранённые домены и режим TLS.
 [Подробности настройки](docs/OPERATIONS.ru.md) · [Файл конфигурации](config.example.env)
+
+## MASQUE
+
+HTTP/2 через TCP/443, отдельное имя SNI и сертификат. Схема UDP сохраняется.
+Для собственного домена: `--masque-domain masque.example.com` с прямой A-записью; по умолчанию — `masque.IP.cdn-one.org`.
+Входящий создаётся пустым. Привяжите клиентов в панели и используйте **JSON-подписку Xray** в клиенте с поддержкой MASQUE.
+[Добавить MASQUE после обновления панели](docs/MASQUE.ru.md).
 
 ## Обновление
 
