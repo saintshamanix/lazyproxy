@@ -44,3 +44,11 @@ BASH
 Лог: `/var/log/single443/install.log`. Резервные копии: `/var/backups/single443/`.
 
 [Upstream 3.10.0](https://github.com/MHSanaei/3x-ui/releases/tag/v3.10.0) · [Проверки](VALIDATION.md)
+
+## Shadowrocket
+
+В истории Shadowrocket 2.2.90 заявлен MASQUE через H2/H3 с настройкой SNI/URI. Это не подтверждает импорт JSON-подписки Xray. Панель 3x-ui 3.10.0 не формирует ссылку MASQUE и отдельный QR: обновление обычной URI-подписки его не добавляет.
+
+Параметры ручного подключения, если приложение предоставляет эти поля: сервер/SNI — сохранённый `masque_domain`, порт 443, транспорт HTTP/2 (`h2`), URI `/.well-known/masque/ip/*/*/`, имя пользователя — Email клиента панели, пароль — пароль этого клиента. Проверку TLS оставьте включённой. Совместимость проверяется реальным подключением.
+
+[Shadowrocket release history](https://apps.apple.com/us/app/shadowrocket/id932747118).

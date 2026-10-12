@@ -44,3 +44,11 @@ The script backs up the stopped panel, adds the inbound through its API, validat
 Log: `/var/log/single443/install.log`. Backups: `/var/backups/single443/`.
 
 [Upstream 3.10.0](https://github.com/MHSanaei/3x-ui/releases/tag/v3.10.0) · [Validation](VALIDATION.md)
+
+## Shadowrocket
+
+Shadowrocket 2.2.90 release notes list MASQUE over H2/H3 with custom SNI/URI. This does not establish support for importing Xray JSON subscriptions. 3x-ui 3.10.0 does not generate a MASQUE share link or individual QR entry, so refreshing a standard URI subscription will not add it.
+
+Manual connection parameters, if exposed by the installed app: server/SNI = saved `masque_domain`, port 443, transport HTTP/2 (`h2`), URI `/.well-known/masque/ip/*/*/`, username = panel client Email, password = that client's password. Keep TLS verification enabled. Client interoperability requires an actual connection test.
+
+[Shadowrocket release history](https://apps.apple.com/us/app/shadowrocket/id932747118).

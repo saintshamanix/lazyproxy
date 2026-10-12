@@ -303,7 +303,7 @@ def discover():
 def inbound_label(s, name):
     code = s.get('country_code', '')
     flag = ''.join(chr(0x1F1E6 + ord(c) - ord('A')) for c in code) if re.fullmatch(r'[A-Z]{2}', code) else '🌐'
-    protocol = {'reality':'REALITY', 'ws':'WS', 'xhttp':'XHTTP', 'grpc':'gRPC', 'hysteria':'Hysteria2', 'amneziawg':'AmneziaWG'}[name]
+    protocol = {'reality':'REALITY', 'ws':'WS', 'xhttp':'XHTTP', 'grpc':'gRPC', 'hysteria':'Hysteria2', 'amneziawg':'AmneziaWG', 'masque':'MASQUE'}[name]
     return f'{flag} {protocol}'
 
 def client_label(name):
@@ -948,7 +948,7 @@ def masque_prepare():
 
 def masque_payload(s):
     name = domain(s['masque_domain'])
-    return dict(remark='MASQUE', enable=True, listen='127.0.0.1', port=MASQUE_PORT,
+    return dict(remark=inbound_label(s, 'masque'), enable=True, listen='127.0.0.1', port=MASQUE_PORT,
                 protocol='masque', settings=json.dumps(dict(clients=[], address=['10.14.0.1/24'], mtu=1400)),
                 streamSettings=json.dumps(dict(network='masque', security='tls',
                     masqueSettings=dict(path=MASQUE_PATH),
@@ -956,7 +956,7 @@ def masque_payload(s):
                         certificates=[dict(certificateFile=MASQUE_CERT+'fullchain.pem',
                                            keyFile=MASQUE_CERT+'privkey.pem')],
                         settings=dict(serverName=name, allowInsecure=False)),
-                    externalProxy=[dict(forceTls='tls', dest=name, port=443, sni=name, remark='MASQUE')])),
+                    externalProxy=[dict(forceTls='tls', dest=name, port=443, sni=name, remark=inbound_label(s, 'masque'))])),
                 sniffing=json.dumps(dict(enabled=False, destOverride=['http', 'tls'])),
                 allocate='{}', total=0, expiryTime=0)
 
@@ -970,7 +970,10 @@ def check_masque_row(row, s):
             stream.get('masqueSettings', {}).get('path') == MASQUE_PATH,
             'MASQUE transport changed; refusing to overwrite')
     expected = json_object(masque_payload(s)['streamSettings'])
-    require(stream.get('externalProxy') == expected['externalProxy'], 'MASQUE public endpoint changed')
+    proxies = stream.get('externalProxy', [])
+    require([{k:v for k,v in proxy.items() if k != 'remark'} for proxy in proxies] ==
+            [{k:v for k,v in proxy.items() if k != 'remark'} for proxy in expected['externalProxy']],
+            'MASQUE public endpoint changed')
     require(stream.get('tlsSettings', {}).get('certificates') == expected['tlsSettings']['certificates'],
             'MASQUE certificate paths changed')
 
@@ -985,7 +988,24 @@ def configure_masque():
     if saved_id:
         matches = [x for x in rows if x.get('id') == saved_id]
         require(len(matches) == 1, 'Managed MASQUE inbound missing')
-        check_masque_row(matches[0], s)
+        row = matches[0]
+        check_masque_row(row, s)
+        # Upgrade the original unflagged labels only; preserve custom names.
+        stream = json_object(row['streamSettings'])
+        changed = row.get('remark') == 'MASQUE'
+        updated = dict(row)
+        if changed: updated['remark'] = inbound_label(s, 'masque')
+        for proxy in stream.get('externalProxy', []):
+            if proxy.get('remark') == 'MASQUE':
+                proxy['remark'] = inbound_label(s, 'masque')
+                changed = True
+        if changed:
+            updated['streamSettings'] = json.dumps(stream)
+            api.call('inbounds/update/'+str(saved_id), updated)
+            actual = next(x for x in api.call('inbounds/list') if x['id'] == saved_id)
+            check_masque_row(actual, s)
+            for key in ('settings', 'sniffing', 'listen', 'port', 'protocol', 'enable'):
+                require(actual.get(key) == row.get(key), 'MASQUE label update changed '+key)
         return
     require(not any(x.get('port') == MASQUE_PORT or x.get('remark') == 'MASQUE' for x in rows),
             'MASQUE inbound conflict')

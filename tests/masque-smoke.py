@@ -128,6 +128,18 @@ with tempfile.TemporaryDirectory(prefix='masque-test-') as directory:
         state['inbound_ids']['masque'] = row['id']
         api.call('clients/add', dict(client=dict(email='masque-test', password='only-ci-password',
             enable=True, subId='masque-ci-sub', totalGB=0, expiryTime=0, limitIp=0), inboundIds=[row['id']]))
+        legacy = next(r for r in api.call('inbounds/list') if r['protocol']=='masque')
+        legacy['remark'] = 'MASQUE'
+        stream = json.loads(legacy['streamSettings'])
+        stream['externalProxy'][0]['remark'] = 'MASQUE'
+        legacy['streamSettings'] = json.dumps(stream)
+        api.call('inbounds/update/'+str(legacy['id']), legacy)
+        state['country_code'] = 'US'; e.save(state)
+        e.configure_masque()
+        renamed = next(r for r in api.call('inbounds/list') if r['id']==legacy['id'])
+        assert renamed['remark'] == '🇺🇸 MASQUE'
+        assert renamed['settings'] == legacy['settings']
+        e.configure_masque()
         config = api.call('server/getConfigJson')
         inbound = next(r for r in config['inbounds'] if r['protocol']=='masque')
         assert inbound['settings']['clients'][0]['pass'] == 'only-ci-password'

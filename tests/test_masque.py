@@ -56,3 +56,13 @@ class MasqueTests(unittest.TestCase):
         self.assertEqual(changed.replace(e.masque_route(state)+'\n',''),original)
         self.assertEqual(e.masque_stream_text(changed,state),changed)
         with self.assertRaises(RuntimeError): e.masque_stream_text(original.replace('custom.example.test','masque.example.test'),state)
+
+    def test_flagged_label_and_legacy_endpoint_validation(self):
+        state=dict(masque_domain='masque.example.test',country_code='US')
+        row=e.masque_payload(state)
+        self.assertEqual(row['remark'],'🇺🇸 MASQUE')
+        stream=json.loads(row['streamSettings'])
+        self.assertEqual(stream['externalProxy'][0]['remark'],'🇺🇸 MASQUE')
+        stream['externalProxy'][0]['remark']='MASQUE'
+        row['streamSettings']=json.dumps(stream)
+        e.check_masque_row(row,state)
