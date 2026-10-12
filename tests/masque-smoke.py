@@ -103,7 +103,25 @@ with tempfile.TemporaryDirectory(prefix='masque-test-') as directory:
         panel = launch([binary], 'panel-restarted', env)
         wait_port(2053); wait_port(2096)
         api = e.API(state)
-        api.call('inbounds/add', e.masque_payload(state))
+        e.STATE = tmp/'state'; e.STATE.mkdir()
+        e.XRAY_DIR = tmp
+        e.panel_version = lambda: 'v3.10.0'
+        # Preserve a pre-existing inbound and its credentials during migration.
+        api.call('inbounds/add', dict(remark='existing', enable=True, listen='127.0.0.1',
+            port=10005, protocol='vless', settings=json.dumps(dict(decryption='none', clients=[
+                dict(id='b6f091c7-53aa-4ff7-a8c4-4a0f98c78e01',email='existing',enable=True,subId='existing')])),
+            streamSettings=json.dumps(dict(network='tcp',security='none')),
+            sniffing='{}',allocate='{}',total=0,expiryTime=0))
+        before = api.call('inbounds/list')
+        state['secondary_ip'] = '203.0.113.8'
+        e.save(state)
+        e.configure_masque()
+        state = e.load()
+        e.configure_masque()
+        assert e.load() == state and state['secondary_ip'] == '203.0.113.8'
+        existing = next(r for r in api.call('inbounds/list') if r['id']==before[0]['id'])
+        assert existing['settings'] == before[0]['settings']
+        assert len(api.call('inbounds/list')) == 2
         row = next(r for r in api.call('inbounds/list') if r['protocol']=='masque')
         e.check_masque_row(row, state)
         assert e.json_object(row['settings'])['clients'] == []

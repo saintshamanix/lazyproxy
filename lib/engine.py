@@ -586,7 +586,7 @@ def inbounds():
     candidate = api.call('server/getConfigJson')
     require(isinstance(candidate, dict) and 'inbounds' in candidate, 'No generated Xray config from API')
     write_json(STATE/'candidate-xray.json', candidate)
-    binaries = list(Path('/usr/local/x-ui/bin').glob('xray-linux-*'))
+    binaries = list((XRAY_DIR/'bin').glob('xray-linux-*'))
     require(len(binaries) == 1, 'Ambiguous Xray binary')
     env = dict(os.environ, XRAY_LOCATION_ASSET='/usr/local/x-ui/bin')
     result = subprocess.run([str(binaries[0]), 'run', '-test', '-config', str(STATE/'candidate-xray.json')], env=env, cwd='/usr/local/x-ui', stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -754,6 +754,10 @@ def diagnose():
     for service in ('x-ui','nginx'):
         check(service+' active', lambda service=service: run(['systemctl','is-active','--quiet',service]))
     check('panel API authentication', lambda: API(s))
+    if s.get('inbound_ids', {}).get('masque'):
+        check('MASQUE TLS/SNI/h2 and panel state', verify_masque)
+        check('MASQUE certificate lifetime', lambda: run(['openssl', 'x509', '-checkend', '604800',
+              '-noout', '-in', MASQUE_CERT+'fullchain.pem']))
     check('certificate remaining lifetime', lambda: run(['openssl','x509','-checkend',
           '86400' if s.get('ip_tls') == 'yes' else '604800','-noout','-in',certificate_dir(s)+'fullchain.pem']))
     if s.get('ip_tls') == 'yes':
@@ -807,6 +811,7 @@ def diagnose():
     def bindings():
         text=subprocess.check_output(['ss','-H','-lnt'],text=True)
         ports = {2053,2096,7443,8443,10001,10002,10003}
+        if s.get('inbound_ids', {}).get('masque'): ports.add(MASQUE_PORT)
         saved = STATE/'subscription.json'
         if saved.exists():
             ports.add(json.loads(saved.read_text())['port'])
@@ -888,6 +893,7 @@ def attach_secondary(address):
 
 
 MASQUE_PORT = 10004
+XRAY_DIR = Path('/usr/local/x-ui')
 MASQUE_CERT = '/etc/letsencrypt/live/single443-masque/'
 MASQUE_PATH = '/.well-known/masque/ip/*/*/'
 
@@ -1001,10 +1007,10 @@ def configure_masque():
     require(isinstance(candidate, dict) and 'inbounds' in candidate, 'Unknown Xray config schema')
     target = STATE/'candidate-masque.json'
     write_json(target, candidate)
-    binaries = list(Path('/usr/local/x-ui/bin').glob('xray-linux-*'))
+    binaries = list((XRAY_DIR/'bin').glob('xray-linux-*'))
     require(len(binaries) == 1, 'Ambiguous Xray binary')
     subprocess.run([str(binaries[0]), 'run', '-test', '-config', str(target)],
-                   cwd='/usr/local/x-ui', env=dict(os.environ, XRAY_LOCATION_ASSET='/usr/local/x-ui/bin'), check=True)
+                   cwd=str(XRAY_DIR), env=dict(os.environ, XRAY_LOCATION_ASSET=str(XRAY_DIR/'bin')), check=True)
     api.call('server/restartXrayService', {})
 
 
