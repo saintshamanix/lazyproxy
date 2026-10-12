@@ -130,7 +130,7 @@ with tempfile.TemporaryDirectory(prefix='masque-test-') as directory:
             enable=True, subId='masque-ci-sub', totalGB=0, expiryTime=0, limitIp=0), inboundIds=[row['id']]))
         legacy = next(r for r in api.call('inbounds/list') if r['protocol']=='masque')
         legacy['remark'] = 'MASQUE'
-        stream = json.loads(legacy['streamSettings'])
+        stream = e.json_object(legacy['streamSettings'])
         stream['externalProxy'][0]['remark'] = 'MASQUE'
         legacy['streamSettings'] = json.dumps(stream)
         api.call('inbounds/update/'+str(legacy['id']), legacy)
