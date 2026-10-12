@@ -48,3 +48,11 @@ class MasqueTests(unittest.TestCase):
         with patch.object(e,'load',return_value=state), patch.object(e,'panel_version',return_value='v3.10.0'), patch.object(e.socket,'getaddrinfo',return_value=[(None,None,None,None,('203.0.113.10',0))]), patch.object(e,'save') as save, patch.object(e,'API') as api:
             with self.assertRaises(RuntimeError):e.masque_prepare()
             save.assert_not_called();api.assert_not_called()
+
+    def test_stream_patch_preserves_other_routes_and_reruns(self):
+        original='stream {\n    map $ssl_preread_server_name $backend {\n        reality.example.test 127.0.0.1:8443;\n        custom.example.test 127.0.0.1:5555;\n        default 127.0.0.1:7443;\n    }\n}\n'
+        state=dict(reality_domain='reality.example.test',masque_domain='masque.example.test',inbound_ids={'masque':7})
+        changed=e.masque_stream_text(original,state)
+        self.assertEqual(changed.replace(e.masque_route(state)+'\n',''),original)
+        self.assertEqual(e.masque_stream_text(changed,state),changed)
+        with self.assertRaises(RuntimeError): e.masque_stream_text(original.replace('custom.example.test','masque.example.test'),state)

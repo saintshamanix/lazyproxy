@@ -7,5 +7,5 @@ if [[ ${SINGLE443_ACME_LOCK_HELD:-no} != yes ]]; then
 fi
 nginx -t
 systemctl reload nginx
-# Xray's Hysteria certificate must also be reloaded.
+# Reload Xray certificates for Hysteria and MASQUE.
 systemctl restart x-ui

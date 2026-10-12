@@ -655,6 +655,8 @@ def render(templates):
     access = f'Panel: https://{s["domain"]}{s["panel_path"]}\nUsername: {s["username"]}\nPassword: {s["password"]}\n'
     for name, sub_id in s['sub_ids'].items():
         access += f'\n{name} subscription: https://{s["domain"]}{d["main_path"]}{sub_id}\n'
+        if d.get('json_path'):
+            access += f'{name} Xray JSON: https://{s["domain"]}{d["json_path"]}{sub_id}\n'
         if d['clash_path'] and name != 'amneziawg':
             access += f'{name} Mihomo: https://{s["domain"]}{d["clash_path"]}{sub_id}\n'
     if 'amneziawg' in s.get('seed_clients', MANAGED_NAMES):
@@ -896,6 +898,23 @@ def masque_route(s):
     return f"        {domain(s['masque_domain'])} 127.0.0.1:{MASQUE_PORT};"
 
 
+def masque_stream_text(text, s):
+    anchor = f"        {domain(s['reality_domain'])} 127.0.0.1:8443;"
+    route = masque_route(s)
+    require(bool(route) and text.count(anchor) == 1, 'Unrecognized SNI dispatcher')
+    if route in text:
+        require(text.count(route) == 1, 'Duplicate MASQUE SNI route')
+        return text
+    require(s['masque_domain'] not in text and '127.0.0.1:10004' not in text,
+            'Conflicting MASQUE SNI route')
+    return text.replace(anchor, anchor+'\n'+route, 1)
+
+
+def render_masque_stream():
+    path = Path('/etc/nginx/single443-stream.conf')
+    path.write_text(masque_stream_text(path.read_text(), load()))
+
+
 def masque_prepare():
     s = load()
     require(has_masque(panel_version()), 'Upgrade the panel to 3.10.0 or newer first')
@@ -946,6 +965,8 @@ def check_masque_row(row, s):
             'MASQUE transport changed; refusing to overwrite')
     expected = json_object(masque_payload(s)['streamSettings'])
     require(stream.get('externalProxy') == expected['externalProxy'], 'MASQUE public endpoint changed')
+    require(stream.get('tlsSettings', {}).get('certificates') == expected['tlsSettings']['certificates'],
+            'MASQUE certificate paths changed')
 
 
 def configure_masque():
@@ -1005,6 +1026,7 @@ def main():
     command=sys.argv[1]
     if command=='init': init()
     elif command=='value': print(load().get(sys.argv[2],''))
+    elif command=='masque-render': render_masque_stream()
     elif command=='masque-prepare': masque_prepare()
     elif command=='masque-add': configure_masque()
     elif command=='masque-check': verify_masque()

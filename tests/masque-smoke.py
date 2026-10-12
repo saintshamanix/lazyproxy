@@ -116,7 +116,7 @@ with tempfile.TemporaryDirectory(prefix='masque-test-') as directory:
         # The panel runs its generated core: exercise the real listener directly.
         wait_port(e.MASQUE_PORT)
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open('http://127.0.0.1:2096/json/masque-ci-sub', timeout=10) as response:
+        with opener.open(urllib.request.Request('http://127.0.0.1:2096/json/masque-ci-sub', headers={'Host': TLS_HOST}), timeout=10) as response:
             exported = json.load(response)
         if isinstance(exported, dict): exported = [exported]
         out = next(o for c in exported for o in c['outbounds'] if o['protocol']=='masque')

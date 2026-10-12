@@ -27,7 +27,7 @@ helper sync-panel-version
 helper masque-prepare
 obtain_masque_cert
 helper masque-add
-render_nginx
+helper masque-render
 activate_nginx
 helper masque-check
 # Keep existing installed adapters intact until all checks succeed.
