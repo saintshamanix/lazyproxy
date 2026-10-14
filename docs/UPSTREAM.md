@@ -56,3 +56,13 @@ LazyProxy uses TLS with ALPN `h2`, a distinct SNI and a loopback listener; it do
 The [upstream JSON exporter](https://github.com/MHSanaei/3x-ui/blob/v3.10.0/internal/sub/json_service.go) maps client email/password into `masqueSettings.user/pass` and applies the public endpoint.
 The [Xray listener](https://github.com/XTLS/Xray-core/blob/v26.10.10/transport/internet/masque/hub.go) supports HTTP/2 over TCP.
 [Setup and limitations](MASQUE.md).
+
+## 3.10.2 compatibility review (2026-10-14)
+
+[Release](https://github.com/MHSanaei/3x-ui/releases/tag/v3.10.2) · [Changes from 3.10.0](https://github.com/MHSanaei/3x-ui/compare/v3.10.0...v3.10.2)
+
+Xray remains 26.10.10. The upstream install/update scripts and MASQUE implementation are unchanged in this comparison. No LazyProxy adapter change is required for the version gate.
+
+[PR #6810](https://github.com/MHSanaei/3x-ui/pull/6810) separates INCY routing from Happ headers. Other fixes cover Shadowsocks live client edits, node-sync writes, VMess import, Clash Hysteria2 Gecko export and Xray crash reports. Sponsor requests now use a shared hostname.
+
+This release does not establish MASQUE key authentication or Shadowrocket interoperability.

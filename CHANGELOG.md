@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.10.2 compatibility — 2026-10-14
+
+- Update panel-upgrade instructions to 3.10.2; keep latest-stable installation and existing IP topology.
+- Add 3.10.2 to the Ubuntu 24.04/26.04 CI matrix, including MASQUE transport checks.
+- Document the INCY/Happ subscription-routing fix; MASQUE client compatibility remains unverified.
+
+
 ## MASQUE / 3.10.0+
 
 - Fresh installations resolve the latest stable upstream release and add an empty MASQUE inbound on 3.10.0+.

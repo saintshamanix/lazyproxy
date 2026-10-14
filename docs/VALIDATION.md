@@ -2,7 +2,13 @@
 
 Results apply to the stated revision and environment, not every VPS or client.
 
-## Current automated baseline — 2026-10-12
+## Deployment check — 2026-10-14
+
+Panel-driven upgrades to 3.10.2 completed on all deployed servers; existing connections remained operational across one- and two-IP deployments. This does not establish MASQUE client interoperability or a clean-install test of 3.10.2.
+
+The CI matrix now includes 3.10.2 on Ubuntu 24.04/26.04. Its result is recorded separately from the earlier baseline below.
+
+## Earlier automated baseline — 2026-10-12
 
 [CI run 38295056533](https://github.com/saintshamanix/lazyproxy/actions/runs/38295056533)
 at `66c78b325b77671ad21424252f0f64f19b77675d`: **all six jobs passed**.
@@ -37,4 +43,4 @@ Validate subscriptions, routing and real traffic on the target VPS after changes
 at `49ed4aa39c2e8c6f4cb15eaad78ff86b43f0855b` passed on Ubuntu 24.04/26.04.
 Detailed historical results remain in [the previous validation record](https://github.com/saintshamanix/lazyproxy/blob/4141c5e988fec816de2cfe7545a3fe873a9556c3/docs/VALIDATION.md).
 
-[Upstream references](UPSTREAM.md) · [Upgrade procedure](UPGRADE-3.9.0.md)
+[Upstream references](UPSTREAM.md) · [Upgrade procedure](UPGRADE-3.10.2.md)
