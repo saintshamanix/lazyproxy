@@ -6,7 +6,11 @@ Results apply to the stated revision and environment, not every VPS or client.
 
 Panel-driven upgrades to 3.10.2 completed on all deployed servers; existing connections remained operational across one- and two-IP deployments. This does not establish MASQUE client interoperability or a clean-install test of 3.10.2.
 
-The CI matrix now includes 3.10.2 on Ubuntu 24.04/26.04. Its result is recorded separately from the earlier baseline below.
+## Current automated baseline — 2026-10-14
+
+[CI run 38625797749](https://github.com/saintshamanix/lazyproxy/actions/runs/38625797749) at `5c284645b5210784186359072d247b69190dd7d0`: **all eight jobs passed**.
+
+The matrix covers 3.8.5, 3.9.0, 3.10.0 and 3.10.2 on Ubuntu 24.04/26.04. Both 3.10.x versions run the MASQUE API, JSON export and authenticated TCP/UDP test through nginx/SNI. Local regression: 58 tests, one platform-conditional skip. These checks do not validate Shadowrocket interoperability.
 
 ## Earlier automated baseline — 2026-10-12
 
