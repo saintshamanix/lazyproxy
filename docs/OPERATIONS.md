@@ -59,7 +59,7 @@ bash "$f" --update-only
 
 This uses the current repository, backs up configuration and refreshes managed components, including site/routing assets.
 It detects the running panel version; it does not upgrade or downgrade 3x-ui.
-For the panel itself, use the [panel upgrade procedure](UPGRADE-3.10.2.md).
+For the panel itself, use the [panel upgrade procedure](UPGRADE-3.11.0.md).
 
 Custom client names and limits are preserved. Legacy `single443-*` names migrate to `UserN`.
 Missing/ambiguous managed identities or incompatible manual changes stop the update.

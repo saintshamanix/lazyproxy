@@ -8,7 +8,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, ubuntu-26.04]
-        panel: [v3.8.5, v3.9.0, v3.10.0, v3.10.2]
+        panel: [v3.8.5, v3.9.0, v3.10.0, v3.10.2, v3.11.0]
     env:
       TEST_PANEL_VERSION: ${{ matrix.panel }}
     runs-on: ${{ matrix.os }}
@@ -73,7 +73,7 @@ jobs:
           sudo --preserve-env=TEST_PANEL_VERSION python3 tests/awg-api-smoke.py
           sudo --preserve-env=TEST_PANEL_VERSION python3 tests/ip-tls-api-smoke.py
       - name: MASQUE API, JSON export and authenticated TCP/UDP via SNI
-        if: matrix.panel == 'v3.10.0' || matrix.panel == 'v3.10.2'
+        if: matrix.panel == 'v3.10.0' || matrix.panel == 'v3.10.2' || matrix.panel == 'v3.11.0'
         run: sudo unshare --net python3 tests/masque-smoke.py
       - name: Validate empty non-REALITY inbounds with actual Xray
         run: |

@@ -38,7 +38,7 @@ REALITY passes through nginx without TLS termination. XHTTP uses HTTP/2 (`grpc_p
 - UFW inactive: LazyProxy manages nftables. Unknown firewall policies stop installation; verified stock Fail2ban SSH rules are preserved.
 - Automatic DNS names must resolve to the VPS; their availability depends on `cdn-one.org`.
 
-Default: **latest stable upstream release**. Current documented release: **3.10.2**. MASQUE is created on **3.10.0+**; explicit 3.8.5/3.9.0 installs retain six inbounds. Future stable releases are accepted, but compatibility is checked during installation, not guaranteed in advance.
+Default: **latest stable upstream release**. Current documented release: **3.11.0**. MASQUE is created on **3.10.0+**; explicit 3.8.5/3.9.0 installs retain six inbounds. Future stable releases are accepted, but compatibility is checked during installation, not guaranteed in advance.
 CI covers Ubuntu 24.04/26.04 amd64. [Validation](docs/VALIDATION.md).
 
 ## Install
@@ -93,7 +93,7 @@ The inbound starts empty. Attach clients in the panel and use **Xray JSON subscr
 ## Update
 
 **3x-ui:** use the panel's update control.
-[Upgrade to 3.10.2](docs/UPGRADE-3.10.2.md) covers both IP topologies; rerunning the installer or reattaching IP2 is unnecessary.
+[Upgrade to 3.11.0](docs/UPGRADE-3.11.0.md) covers both IP topologies; rerunning the installer or reattaching IP2 is unnecessary.
 
 **LazyProxy components:** a separate, optional `--update-only` operation.
 It does not change the panel version. [Procedure](docs/OPERATIONS.md#lazyproxy-update).

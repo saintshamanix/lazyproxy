@@ -66,3 +66,13 @@ Xray remains 26.10.10. The upstream install/update scripts and MASQUE implementa
 [PR #6810](https://github.com/MHSanaei/3x-ui/pull/6810) separates INCY routing from Happ headers. Other fixes cover Shadowsocks live client edits, node-sync writes, VMess import, Clash Hysteria2 Gecko export and Xray crash reports. Sponsor requests now use a shared hostname.
 
 This release does not establish MASQUE key authentication or Shadowrocket interoperability.
+
+## 3.11.0 release review (2026-10-26)
+
+[Panel release](https://github.com/MHSanaei/3x-ui/releases/tag/v3.11.0) · [Changes from 3.10.2](https://github.com/MHSanaei/3x-ui/compare/v3.10.2...v3.11.0)
+
+The bundled core is Xray 26.10.21. Its [security release](https://github.com/XTLS/Xray-core/releases/tag/v26.10.21) removes problematic trust roots and supersedes the withdrawn 26.10.10/26.10.17 builds. Verify the running core after a panel update.
+
+The panel improves embedded AmneziaWG throughput and adds an optional NAT-only Linux kernel datapath. Kernel mode needs separate host, firewall and routing validation; embedded API/listener checks do not qualify it. External Proxy edits now update imported Hosts, and subscription routes send Cache-Control: no-store.
+
+[MASQUE inbound authentication](https://github.com/XTLS/Xray-core/blob/v26.10.21/proxy/masque/server.go) still uses HTTP Basic credentials. The release does not establish Shadowrocket interoperability. See the [upgrade guide](UPGRADE-3.11.0.md) and [validation record](VALIDATION.md) for deployment and CI scope.

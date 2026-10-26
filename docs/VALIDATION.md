@@ -2,11 +2,17 @@
 
 Results apply to the stated revision and environment, not every VPS or client.
 
-## Deployment check — 2026-10-14
+## Deployment check — 2026-10-26
+
+The panel-driven upgrade to 3.11.0 completed with existing connectivity preserved. This operational result does not establish a clean-install test, kernel AmneziaWG support, independently measured Xray version or MASQUE client interoperability.
+
+The CI matrix includes 3.11.0 on Ubuntu 24.04/26.04, including the existing embedded-AWG and MASQUE checks. Results for this version are pending; earlier results below are not transferred to it.
+
+## Earlier deployment check — 2026-10-14
 
 Panel-driven upgrades to 3.10.2 completed on all deployed servers; existing connections remained operational across one- and two-IP deployments. This does not establish MASQUE client interoperability or a clean-install test of 3.10.2.
 
-## Current automated baseline — 2026-10-14
+## Earlier automated baseline — 2026-10-14
 
 [CI run 38625797749](https://github.com/saintshamanix/lazyproxy/actions/runs/38625797749) at `5c284645b5210784186359072d247b69190dd7d0`: **all eight jobs passed**.
 
@@ -47,4 +53,4 @@ Validate subscriptions, routing and real traffic on the target VPS after changes
 at `49ed4aa39c2e8c6f4cb15eaad78ff86b43f0855b` passed on Ubuntu 24.04/26.04.
 Detailed historical results remain in [the previous validation record](https://github.com/saintshamanix/lazyproxy/blob/4141c5e988fec816de2cfe7545a3fe873a9556c3/docs/VALIDATION.md).
 
-[Upstream references](UPSTREAM.md) · [Upgrade procedure](UPGRADE-3.10.2.md)
+[Upstream references](UPSTREAM.md) · [Upgrade procedure](UPGRADE-3.11.0.md)

@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.11.0 compatibility — 2026-10-26
+
+- Update bilingual upgrade guidance and current documentation to 3.11.0 / bundled Xray 26.10.21; link the upstream security advisory for withdrawn core releases.
+- Add 3.11.0 to the Ubuntu 24.04/26.04 CI matrix, including embedded AmneziaWG and MASQUE checks.
+- Record the successful panel-driven upgrade separately from clean-install and automated coverage.
+- Keep embedded AmneziaWG as the documented upgrade path; kernel mode requires separate validation. MASQUE/Shadowrocket interoperability remains unverified.
+
 ## 3.10.2 compatibility — 2026-10-14
 
 - Update panel-upgrade instructions to 3.10.2; keep latest-stable installation and existing IP topology.
