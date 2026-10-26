@@ -38,7 +38,7 @@ REALITY passes through nginx without TLS termination. XHTTP uses HTTP/2 (`grpc_p
 - UFW inactive: LazyProxy manages nftables. Unknown firewall policies stop installation; verified stock Fail2ban SSH rules are preserved.
 - Automatic DNS names must resolve to the VPS; their availability depends on `cdn-one.org`.
 
-Default: **latest stable upstream release**. Current documented release: **3.11.0**. MASQUE is created on **3.10.0+**; explicit 3.8.5/3.9.0 installs retain six inbounds. Future stable releases are accepted, but compatibility is checked during installation, not guaranteed in advance.
+Default: **latest stable upstream release**. Current documented release: **3.11.0**. MASQUE is created on **3.10.0+**. Future stable releases are accepted, but compatibility is checked during installation, not guaranteed in advance.
 CI covers Ubuntu 24.04/26.04 amd64. [Validation](docs/VALIDATION.md).
 
 ## Install
