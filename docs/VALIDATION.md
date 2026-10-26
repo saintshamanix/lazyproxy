@@ -6,7 +6,11 @@ Results apply to the stated revision and environment, not every VPS or client.
 
 The panel-driven upgrade to 3.11.0 completed with existing connectivity preserved. This operational result does not establish a clean-install test, kernel AmneziaWG support, independently measured Xray version or MASQUE client interoperability.
 
-The CI matrix includes 3.11.0 on Ubuntu 24.04/26.04, including the existing embedded-AWG and MASQUE checks. Results for this version are pending; earlier results below are not transferred to it.
+## Current automated baseline — 2026-10-26
+
+[CI run 40263754685](https://github.com/saintshamanix/lazyproxy/actions/runs/40263754685) at `ab52c5933df99bfd2248003e28d73e0374d331c0`: **all ten jobs passed**.
+
+The matrix covers 3.8.5, 3.9.0, 3.10.0, 3.10.2 and 3.11.0 on Ubuntu 24.04/26.04. Both 3.11.0 jobs passed embedded AmneziaWG API/listener checks, MASQUE API/JSON export and authenticated TCP/UDP through nginx/SNI, and authenticated XHTTP transfers. Local regression: 58 tests, one platform-conditional skip. These checks do not establish a full public-VPS clean installation, kernel AmneziaWG operation or Shadowrocket interoperability.
 
 ## Earlier deployment check — 2026-10-14
 
