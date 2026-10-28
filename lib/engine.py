@@ -619,6 +619,40 @@ def sub_locations(d):
         blocks.append('\n'.join(lines+['    }']))
     return '\n'.join(blocks)
 
+def preserve_sponsor_filter(text, panel_path, current):
+    """Carry forward only the exact opt-in filter; regenerate its panel path."""
+    begin = '    # BEGIN single443-sponsor-filter v1\n'
+    end = '    # END single443-sponsor-filter v1\n'
+    old = current.read_text() if current.exists() else ''
+    if begin not in old and end not in old:
+        return text
+    require(old.count(begin) == old.count(end) == 1, 'Invalid sponsor filter markers')
+    start, stop = old.index(begin), old.index(end) + len(end)
+    require(stop > start, 'Invalid sponsor filter marker order')
+    block = old[start:stop]
+    match = re.search(r'location = (/[A-Za-z0-9_/-]+)sponsors \{', block)
+    require(match is not None, 'Invalid sponsor filter path')
+    old_path = match.group(1)
+    for path in (old_path, panel_path):
+        require(re.fullmatch(r'/[A-Za-z0-9_/-]+/', path) is not None and '//' not in path,
+                'Unsupported sponsor filter panel path')
+    def rules(path):
+        return (begin
+                + '    location = ' + path + 'sponsors {\n'
+                + '        default_type application/json;\n'
+                + '        add_header Cache-Control "no-store" always;\n'
+                + '        return 200 \'{"success":true,"msg":"","obj":{"contact":"","sponsors":[]}}\';\n'
+                + '    }\n'
+                + '    location ^~ ' + path + 'sponsors/logo/ {\n'
+                + '        return 404;\n'
+                + '    }\n' + end)
+    require(block == rules(old_path), 'Sponsor filter was edited manually; refusing to overwrite')
+    location = '    location ^~ ' + panel_path + ' {\n'
+    require(text.count(location) == 1, 'Cannot locate panel for sponsor filter')
+    require(begin not in text and end not in text, 'Unexpected filter in nginx template')
+    return text.replace(location, rules(panel_path) + location, 1)
+
+
 def render(templates):
     s = load()
     d = json.loads((STATE/'subscription.json').read_text())
@@ -626,12 +660,17 @@ def render(templates):
                     'WS_PATH':s['ws_path'], 'XHTTP_PATH':s['xhttp_path'], 'GRPC_SERVICE':s['grpc_service'],
                     'CERT_DIR':certificate_dir(s), 'SUB_LOCATIONS':sub_locations(d),
                     'MASQUE_ROUTE':masque_route(s)}
+    rendered = []
     for source, target in [('nginx-stream.conf.tpl','/etc/nginx/single443-stream.conf'),
                            ('nginx-web.conf.tpl','/etc/nginx/conf.d/single443-web.conf')]:
         text = (Path(templates)/source).read_text()
         for key,value in replacements.items():
             text = text.replace('@'+key+'@', value)
         require(not re.search(r'@[A-Z_]+@',text), 'Unresolved nginx template')
+        if source == 'nginx-web.conf.tpl':
+            text = preserve_sponsor_filter(text, s['panel_path'], Path(target))
+        rendered.append((target, text))
+    for target, text in rendered:
         Path(target).write_text(text)
         Path(target).chmod(0o644)
     main = Path('/etc/nginx/nginx.conf')
