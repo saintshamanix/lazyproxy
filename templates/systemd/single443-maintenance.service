@@ -1,0 +1,11 @@
+[Unit]
+Description=single443 log and package cache maintenance
+After=systemd-journald.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/single443-maintenance
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=30min
+UMask=0077

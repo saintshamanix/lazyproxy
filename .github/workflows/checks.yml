@@ -1,0 +1,98 @@
+name: Static and nginx checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-26.04]
+        panel: [v3.8.5, v3.9.0, v3.10.0, v3.10.2, v3.11.0]
+    env:
+      TEST_PANEL_VERSION: ${{ matrix.panel }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update -q && sudo apt-get install -y shellcheck curl ca-certificates python3 openssl nginx libnginx-mod-stream certbot dnsutils iproute2 util-linux nftables kmod fail2ban python3-systemd
+      - name: Record target and dependency versions
+        run: |
+          cat /etc/os-release
+          python3 --version
+          nginx -v
+          certbot --version
+          nft --version
+          systemctl --version | head -1
+      - run: find . -name '*.sh' -exec bash -n {} \;
+      - run: shellcheck -S warning -e SC1090,SC1091,SC2034 $(find . -name '*.sh')
+      - run: python3 -m unittest discover -s tests -v
+      - run: sudo unshare --net bash tests/firewall-netns.sh
+      - name: Render and validate actual nginx configuration
+        shell: bash
+        run: |
+          mkdir -p /tmp/single443-test
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=web.example.com -keyout /tmp/single443-test/privkey.pem -out /tmp/single443-test/fullchain.pem
+          python3 tests/render_fixtures.py /tmp/single443-test AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+          cat > /tmp/single443-test/nginx.conf <<'EOF'
+          include /etc/nginx/modules-enabled/*.conf;
+          pid /tmp/single443-test/nginx.pid;
+          error_log /tmp/single443-test/error.log;
+          events {}
+          http { include /tmp/single443-test/web.conf; }
+          include /tmp/single443-test/stream.conf;
+          EOF
+          sudo nginx -t -c /tmp/single443-test/nginx.conf
+      - name: Real upstream AmneziaWG API smoke test
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p /tmp/single443-api
+          if ! curl -fLsS --retry 3 --connect-timeout 15 --max-time 120 \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -D /tmp/single443-api/release.headers \
+            "https://api.github.com/repos/MHSanaei/3x-ui/releases/tags/${TEST_PANEL_VERSION}" \
+            -o /tmp/single443-api/release.json; then
+            echo "::error::GitHub release metadata download failed"
+            grep -Ei '^(HTTP/|x-ratelimit-|retry-after:|x-github-request-id:)' /tmp/single443-api/release.headers || true
+            exit 1
+          fi
+          curl -fLsS --retry 3 https://github.com/MHSanaei/3x-ui/releases/download/${TEST_PANEL_VERSION}/x-ui-linux-amd64.tar.gz -o /tmp/single443-api/x-ui-linux-amd64.tar.gz
+          python3 lib/engine.py verify-release /tmp/single443-api/x-ui-linux-amd64.tar.gz /tmp/single443-api/release.json
+          tar -xzf /tmp/single443-api/x-ui-linux-amd64.tar.gz -C /tmp/single443-api
+          sudo mkdir -p /etc/x-ui
+          cd /tmp/single443-api/x-ui
+          sudo ./x-ui migrate >/dev/null
+          sudo ./x-ui setting -port 2053 -listenIP 127.0.0.1 -webBasePath /ci-test/ -username ci-user -password ci-password-only >/dev/null
+          sudo ./x-ui > /tmp/single443-api/panel.log 2>&1 &
+          panel_pid=$!
+          trap 'sudo kill "$panel_pid" 2>/dev/null || true' EXIT
+          cd "$GITHUB_WORKSPACE"
+          sudo --preserve-env=TEST_PANEL_VERSION python3 tests/awg-api-smoke.py
+          sudo --preserve-env=TEST_PANEL_VERSION python3 tests/ip-tls-api-smoke.py
+      - name: MASQUE API, JSON export and authenticated TCP/UDP via SNI
+        if: matrix.panel == 'v3.10.0' || matrix.panel == 'v3.10.2' || matrix.panel == 'v3.11.0'
+        run: sudo unshare --net python3 tests/masque-smoke.py
+      - name: Validate empty non-REALITY inbounds with actual Xray
+        run: |
+          TEST_SINGLE_CLIENT=yes python3 tests/render_fixtures.py /tmp/single443-test AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+          sudo /tmp/single443-api/x-ui/bin/xray-linux-amd64 run -test -config /tmp/single443-test/xray.json
+      - name: Authenticated XHTTP transfer through nginx and SNI dispatcher
+        run: |
+          sudo unshare --net python3 tests/xhttp-smoke.py
+          sudo unshare --net python3 tests/xhttp-smoke.py --mode packet-up
+          sudo unshare --net python3 tests/xhttp-smoke.py --mode stream-one
+          sudo unshare --net python3 tests/xhttp-smoke.py --ip-tls
+      - name: BBR and fail2ban setup with real nftables actions
+        shell: bash
+        run: sudo bash tests/tuning-smoke.sh
+      - name: Install and verify maintenance timer without running cleanup
+        shell: bash
+        run: |
+          sudo bash -c 'set -Eeuo pipefail; ROOT="$PWD"; source lib/common.sh; source lib/maintenance.sh; mkdir -p /etc/single443; install_maintenance; install_maintenance; systemctl is-enabled single443-maintenance.timer; systemctl is-active single443-maintenance.timer'
+      - name: Isolated IP Certbot and renewal timer
+        shell: bash
+        run: |
+          sudo bash -c 'set -Eeuo pipefail; ROOT="$PWD"; source lib/common.sh; source lib/certs.sh; helper() { echo yes; }; install_renew_hook; install_renew_hook; /opt/single443-certbot-5.8.0/bin/certbot --help all | grep -- --ip-address; systemctl is-active single443-acme.timer'

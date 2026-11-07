@@ -1,0 +1,1216 @@
+#!/usr/bin/env python3
+"""Version-bounded 3x-ui API adapter; SQLite is opened read-only for discovery."""
+import base64
+import hashlib
+import http.cookiejar
+import ipaddress
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import socket
+import sqlite3
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+
+STATE = Path('/etc/single443')
+CERT = '/etc/letsencrypt/live/single443/'
+CLIENT_NAMES = ('reality', 'ws', 'xhttp', 'grpc', 'hysteria')
+MANAGED_NAMES = CLIENT_NAMES + ('amneziawg',)
+SUPPORTED_PANEL_VERSIONS = ('v3.8.5', 'v3.9.0')
+
+def require(ok, message):
+    if not ok:
+        raise RuntimeError(message)
+
+def supported_panel_version(value):
+    match = re.fullmatch(r'v?(\d+)\.(\d+)\.(\d+)', value)
+    return bool(match) and (tuple(map(int, match.groups())) >= (3, 10, 0) or
+                            'v'+value.removeprefix('v') in SUPPORTED_PANEL_VERSIONS)
+
+
+def has_masque(value):
+    return supported_panel_version(value) and tuple(map(int, value.removeprefix('v').split('.'))) >= (3, 10, 0)
+
+
+def panel_version():
+    """Use the installed binary, not stale installer state after a UI upgrade."""
+    value = subprocess.check_output(['/usr/local/x-ui/x-ui', '-v'], text=True).strip()
+    version = 'v' + value.removeprefix('v')
+    require(supported_panel_version(version), 'Unsupported live panel version: '+value)
+    return version
+
+
+def sync_panel_version():
+    s = load()
+    version = panel_version()
+    if s.get('installed_version') != version:
+        s['installed_version'] = version
+        save(s)
+    print(version)
+
+
+def write_json(path, data):
+    path = Path(path)
+    tmp = path.with_suffix(path.suffix + '.tmp')
+    tmp.write_text(json.dumps(data, indent=2) + '\n')
+    tmp.chmod(0o600)
+    tmp.replace(path)
+
+def json_object(value):
+    # 3.8.5 emits JSON objects; older responses may contain JSON text.
+    result = json.loads(value) if isinstance(value, (str, bytes)) else json.loads(json.dumps(value))
+    require(isinstance(result, dict), 'Expected JSON object from panel')
+    return result
+
+def load():
+    return json.loads((STATE / 'state.json').read_text())
+
+def save(s):
+    write_json(STATE / 'state.json', s)
+
+def run(args, **kwargs):
+    return subprocess.run(args, check=True, **kwargs)
+
+def domain(value):
+    require(isinstance(value, str) and len(value) < 254 and re.fullmatch(r'[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?', value), 'Unsafe domain')
+    require(all(label and len(label) <= 63 and not label.startswith('-') and not label.endswith('-') for label in value.split('.')), 'Invalid domain labels')
+    return value
+
+def path_value(value):
+    require(isinstance(value, str) and re.fullmatch(r'/(?:[A-Za-z0-9_-]+/)+', value), 'Unsupported or unsafe subscription path; nginx unchanged')
+    return value
+
+def certificate_dir(s):
+    return '/etc/single443/acme/live/single443/' if s.get('ip_tls') == 'yes' else CERT
+
+
+def installation_domains(ip, saved=None):
+    web = os.environ.get('WEB_DOMAIN', '')
+    reality = os.environ.get('REALITY_DOMAIN', '')
+    mode = os.environ.get('IP_TLS', '') or (saved or {}).get('ip_tls', 'no')
+    require(mode in ('yes', 'no'), 'IP_TLS must be yes or no')
+    if saved:
+        require(mode == saved.get('ip_tls', 'no'), 'Changing TLS mode requires a separate migration')
+    if mode == 'yes':
+        require(not web and not reality, 'IP TLS uses an automatic REALITY domain; omit custom domain options')
+        names = [ip, saved['reality_domain'] if saved else
+                 domain(ip.replace('.', '-') + '.' + domain(os.environ.get('AUTO_DOMAIN_SUFFIX', 'cdn-one.org')))]
+        if saved:
+            require(saved['ip'] == ip and saved['domain'] == ip, 'IP changed; migration refused')
+        return names
+    require(bool(web) == bool(reality),
+            'Set both WEB_DOMAIN and REALITY_DOMAIN, or leave both empty')
+    if web:
+        names = []
+        for value in (web, reality):
+            value = domain(value.lower())
+            require('.' in value and not value.endswith('.'), 'Use a fully qualified DNS name')
+            try:
+                ipaddress.ip_address(value)
+            except ValueError:
+                pass
+            else:
+                raise RuntimeError('Use DNS names, not IP literals')
+            names.append(value)
+        require(names[0] != names[1], 'WEB and REALITY domains must differ for SNI routing')
+    elif saved:
+        names = [saved['domain'], saved['reality_domain']]
+    else:
+        suffix = domain(os.environ.get('AUTO_DOMAIN_SUFFIX', 'cdn-one.org'))
+        names = [domain(ip + '.' + suffix), domain(ip.replace('.', '-') + '.' + suffix)]
+    if saved:
+        require(saved['ip'] == ip and names == [saved['domain'], saved['reality_domain']],
+                'IP/domain changed; automatic migration is intentionally refused')
+    return names
+
+
+def init():
+    ip = os.environ.get('PUBLIC_IPV4', '')
+    if not ip:
+        probes = []
+        for url in ('https://api.ipify.org', 'https://ipv4.icanhazip.com'):
+            probes.append(subprocess.check_output(['curl', '-4', '-fLsS', '--max-time', '15', url], text=True).strip())
+        require(len(set(probes)) == 1, 'IPv4 discovery sources disagree; set PUBLIC_IPV4 explicitly')
+        ip = probes[0]
+    require(ipaddress.IPv4Address(ip).is_global, 'A globally routable IPv4 is required')
+    saved = load() if (STATE / 'state.json').exists() else None
+    names = installation_domains(ip, saved)
+    for name in names:
+        if name == ip:
+            continue
+        addresses = {x[4][0] for x in socket.getaddrinfo(name, None, socket.AF_INET)}
+        require(addresses == {ip}, f'DNS A for {name} does not exclusively resolve to this VPS')
+        # AAAA pointing elsewhere breaks ACME HTTP-01 validation.
+        aaaa = subprocess.check_output(['dig', '+short', 'AAAA', name], text=True).strip()
+        require(not aaaa, f'{name} has AAAA/CNAME records; this IPv4-only adapter requires unambiguous DNS')
+    if saved:
+        return
+    s = dict(seed_clients=['reality'], ip=ip, ip_tls='yes' if names[0] == ip else 'no', domain=names[0], reality_domain=names[1], username='admin_' + secrets.token_hex(5),
+             password=secrets.token_urlsafe(32), sub_ids={'reality': secrets.token_hex(16)}, configured=False,
+             installed_version='', short_id=secrets.token_hex(8), trojan_password=secrets.token_urlsafe(32),
+             hysteria_auth=secrets.token_urlsafe(32), grpc_service='g' + secrets.token_hex(12))
+    for key in ('panel_path', 'ws_path', 'xhttp_path', 'sub_path', 'json_path', 'clash_path'):
+        s[key] = '/' + secrets.token_hex(16) + '/'
+    # Exact WS location and a slash-ending XHTTP prefix.
+    s['ws_path'] = s['ws_path'].rstrip('/')
+    s['trojan_ws_path'] = '/trojan-ws-' + secrets.token_hex(16)
+    s['uuids'] = {name: str(uuid.uuid4()) for name in ('reality', 'ws', 'xhttp')}
+    save(s)
+
+class API:
+    def __init__(self, s):
+        self.base = 'http://127.0.0.1:2053' + s['panel_path']
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        self.csrf = ''
+        self.csrf = self.request('csrf-token')['obj']
+        self.request('login', dict(username=s['username'], password=s['password']), form=True)
+        self.csrf = self.request('panel/csrf-token')['obj']
+
+    def request(self, endpoint, data=None, form=False):
+        headers = {'X-CSRF-Token': self.csrf, 'Accept': 'application/json'}
+        body = None
+        if data is not None:
+            headers['Content-Type'] = 'application/x-www-form-urlencoded' if form else 'application/json'
+            body = (urllib.parse.urlencode(data) if form else json.dumps(data)).encode()
+        req = urllib.request.Request(self.base + endpoint, data=body, headers=headers)
+        try:
+            with self.opener.open(req, timeout=25) as response:
+                obj = json.load(response)
+        except (urllib.error.HTTPError, urllib.error.URLError, ValueError) as e:
+            # Do not print response bodies: they may contain credentials/configs.
+            raise RuntimeError(f'API {endpoint.split("/")[0]} failed ({type(e).__name__})') from None
+        require(isinstance(obj, dict) and obj.get('success') is True, f'API rejected {endpoint}; see panel journal')
+        return obj
+
+    def call(self, endpoint, data=None):
+        return self.request('panel/api/' + endpoint, data).get('obj')
+
+def wait_panel():
+    for _ in range(40):
+        try:
+            return API(load())
+        except (RuntimeError, OSError):
+            time.sleep(1)
+    raise RuntimeError('Panel API did not become ready within 40s')
+
+def bootstrap_cli():
+    s = load()
+    run(['/usr/local/x-ui/x-ui', 'setting', '-port', '2053', '-listenIP', '127.0.0.1',
+         '-webBasePath', s['panel_path'], '-username', s['username'], '-password', s['password']], stdout=subprocess.DEVNULL)
+
+def configure_panel():
+    s = load()
+    api = API(s)
+    settings = api.call('setting/all', {})
+    require(isinstance(settings, dict), 'Settings API returned unexpected shape')
+    if not s['configured']:
+        changes = dict(subEnable=True, subListen='127.0.0.1', subPort=2096, subDomain=s['reality_domain'] if s.get('ip_tls') == 'yes' else s['domain'],
+                       subPath=s['sub_path'], subCertFile=certificate_dir(s)+'fullchain.pem', subKeyFile=certificate_dir(s)+'privkey.pem',
+                       subJsonEnable=True, subJsonPath=s['json_path'], subClashEnable=True, subClashPath=s['clash_path'],
+                       subURI='https://'+s['domain']+s['sub_path'], subJsonURI='https://'+s['domain']+s['json_path'],
+                       subClashURI='https://'+s['domain']+s['clash_path'])
+        require(set(changes) <= set(settings), 'Selected release lacks required settings API capabilities')
+        settings.update(changes)
+        if 'trustedProxyCIDRs' in settings:
+            settings['trustedProxyCIDRs'] = '127.0.0.1/32'
+        api.call('setting/update', settings)
+        run(['systemctl', 'restart', 'x-ui'])
+        wait_panel()
+    s['installed_version'] = os.environ['TAG']
+    save(s)
+
+def read_database(db, defaults_text=''):
+    # Values may be absent from SQLite when upstream defaults apply.
+    defaults = dict(re.findall(r'^\s*"([A-Za-z0-9]+)":\s*"([^"\n]*)",?\s*$', defaults_text, re.M))
+    con = sqlite3.connect(Path(db).resolve().as_uri() + '?mode=ro', uri=True)
+    con.execute('PRAGMA query_only=ON')
+    candidates = []
+    def ident(name):
+        return '"' + name.replace('"', '""') + '"'
+    try:
+        tables = con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()
+        for (table,) in tables:
+            columns = [r[1] for r in con.execute('PRAGMA table_info(' + ident(table) + ')')]
+            names = {x.lower(): x for x in columns}
+            # Column semantics are matched, never positional SELECT * or a fixed table name.
+            key = next((names[x] for x in ('key', 'name', 'setting_key') if x in names), None)
+            value = next((names[x] for x in ('value', 'setting_value') if x in names), None)
+            if not key or not value:
+                continue
+            rows = con.execute('SELECT '+ident(key)+','+ident(value)+' FROM '+ident(table)).fetchall()
+            pairs = dict(rows)
+            if any(k in pairs for k in ('subPort', 'subPath', 'webPort', 'webBasePath')):
+                require(len(rows) == len(pairs), 'Duplicate settings keys')
+                candidates.append(pairs)
+        require(len(candidates) == 1, 'Ambiguous/unknown SQLite schema; discovery stopped safely')
+        defaults.update(candidates[0])
+        return defaults
+    finally:
+        con.close()
+
+def truth(x):
+    return x is True or str(x).lower() == 'true'
+
+def discover_settings(settings, s):
+    required = {'subPort', 'subPath', 'subDomain', 'subCertFile', 'subKeyFile', 'subListen', 'subEnable'}
+    require(required <= set(settings), 'Missing effective subscription settings; no guessed port/path/TLS')
+    require(truth(settings['subEnable']), 'Subscription server is disabled')
+    port = int(settings['subPort'])
+    require(1 <= port <= 65535 and port not in (443, 7443, 8443, 2053, 10001, 10002, 10003), 'Invalid/conflicting subscription port')
+    if native_ws_path(s):
+        require(port != TROJAN_WS_PORT, 'Subscription port collides with Trojan WS')
+    listen = settings['subListen']
+    require(listen in ('127.0.0.1', '::1', '', '0.0.0.0', '::'), 'Subscription listen address is not supported')
+    cert, key = settings['subCertFile'], settings['subKeyFile']
+    require(bool(cert) == bool(key), 'Incomplete subscription TLS pair')
+    if cert:
+        require(Path(cert).is_file() and Path(key).is_file(), 'Subscription TLS files missing')
+    host = domain(settings['subDomain'] or s['domain'])
+    paths = [path_value(settings['subPath'])]
+    for enabled, name in (('subJsonEnable', 'subJsonPath'), ('subClashEnable', 'subClashPath')):
+        if truth(settings.get(enabled)):
+            paths.append(path_value(settings[name]))
+    paths = list(dict.fromkeys(paths))
+    reserved = [s['panel_path'], s['xhttp_path'], s['ws_path']+'/', '/'+s['grpc_service']+'/', '/routing/']
+    if native_ws_path(s):
+        reserved.append(s['trojan_ws_path']+'/')
+    if truth(settings.get('subClashEnable')):
+        require(not any(p in ('/mihomo/', '/clash/') and p != settings.get('subClashPath') for p in paths), 'Subscription format collides with a public Clash alias')
+    require(not any(a.startswith(b) or b.startswith(a) for a in paths for b in reserved), 'Subscription path collides with managed routes')
+    require(not any(a != b and (a.startswith(b) or b.startswith(a)) for a in paths for b in paths), 'Overlapping subscription paths')
+    return dict(port=port, host=host, tls=bool(cert), cert=cert, key=key,
+                address='::1' if listen == '::1' else '127.0.0.1', paths=paths, main_path=paths[0],
+                clash_path=settings.get('subClashPath') if truth(settings.get('subClashEnable')) else None,
+                json_path=settings.get('subJsonPath') if truth(settings.get('subJsonEnable')) else None,
+                public_uri=settings.get('subURI', ''), source='effective-settings')
+
+def discover():
+    s = load()
+    try:
+        settings = API(s).call('setting/all', {})
+        source = 'API'
+    except RuntimeError:
+        settings = read_database('/etc/x-ui/x-ui.db', (STATE/'upstream-setting.go').read_text())
+        source = 'SQLite read-only + selected-tag defaults'
+    result = discover_settings(settings, s)
+    result['source'] = source
+    write_json(STATE/'subscription.json', result)
+    print('Subscription discovery OK ('+source+'); values kept in root-only state')
+    return result
+
+def inbound_label(s, name):
+    code = s.get('country_code', '')
+    flag = ''.join(chr(0x1F1E6 + ord(c) - ord('A')) for c in code) if re.fullmatch(r'[A-Z]{2}', code) else '🌐'
+    protocol = {'reality':'REALITY', 'ws':'WS', 'xhttp':'XHTTP', 'grpc':'gRPC', 'trojan_ws':'Trojan WS', 'hysteria':'Hysteria2', 'amneziawg':'AmneziaWG', 'masque':'MASQUE'}[name]
+    return f'{flag} {protocol}'
+
+def client_label(name):
+    return 'User'+str(MANAGED_NAMES.index(name)+1)
+
+
+def managed_client(s, rows, name):
+    """Resolve identity by saved inbound ID and subId, never by display name."""
+    inbound_id = s.get('inbound_ids', {}).get(name)
+    sub_id = s.get('sub_ids', {}).get(name)
+    require(inbound_id is not None and bool(sub_id), 'Managed identity is missing')
+    matches = [r for r in rows if r.get('id') == inbound_id]
+    require(len(matches) == 1, 'Managed inbound missing or ambiguous')
+    row = matches[0]
+    clients = [c for c in json_object(row['settings']).get('clients', [])
+               if c.get('subId') == sub_id]
+    require(len(clients) == 1, 'Managed subscription identity is ambiguous')
+    require(isinstance(clients[0].get('email'), str) and bool(clients[0]['email']),
+            'Managed client name is missing')
+    return row, clients[0]
+
+
+def rename_clients(s, api):
+    """Migrate legacy installer names; preserve user-defined client names."""
+    rows = api.call('inbounds/list')
+    plans = []
+    for name in s.get('seed_clients', MANAGED_NAMES):
+        row, client = managed_client(s, rows, name)
+        target = client_label(name)
+        if client['email'] != 'single443-'+name:
+            continue
+        require(not any(c.get('email') == target for r in rows
+                        for c in json_object(r['settings']).get('clients', [])),
+                'Target client name already exists: '+target)
+        info = api.call('clients/get/'+urllib.parse.quote(client['email'], safe=''))
+        require(info.get('inboundIds') == [row['id']], 'Managed client has extra inbound attachments')
+        payload = dict(client, email=target, limitHwid=info['client'].get('limitHwid', 0))
+        plans.append((row['id'], client, payload))
+    for inbound_id, before, payload in plans:
+        api.call('clients/update/'+urllib.parse.quote(before['email'], safe=''), payload)
+        row = next(r for r in api.call('inbounds/list') if r['id'] == inbound_id)
+        matches = [c for c in json_object(row['settings'])['clients'] if c.get('email') == payload['email']]
+        require(len(matches) == 1, 'Client rename verification failed')
+        for key, value in before.items():
+            if key not in ('email', 'updated_at', 'updatedAt'):
+                require(matches[0].get(key) == value, 'Client rename changed '+key+'; rolling back')
+
+
+def export_amnezia(s, api):
+    _, client = managed_client(s, api.call('inbounds/list'), 'amneziawg')
+    links = api.call('clients/links/'+urllib.parse.quote(client['email'], safe=''))
+    require(isinstance(links, list) and len(links) == 1 and links[0].startswith('vpn://'),
+            'Unexpected upstream AmneziaWG export')
+    validate_links(links[0].encode(), s, 'amneziawg')
+    encoded = links[0][6:]
+    conf = base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4))
+    target = STATE/'User6-AmneziaWG.conf'
+    target.write_bytes(conf)
+    target.chmod(0o600)
+
+
+def detect_country(s):
+    if s.get('country_code'):
+        return
+    try:
+        raw = subprocess.check_output(['curl','-fLsS','--max-time','10',
+            'https://ipwho.is/'+s['ip']+'?fields=success,ip,country_code'], text=True)
+        data = json.loads(raw)
+        require(data.get('success') is True and data.get('ip') == s['ip'], 'Geolocation lookup failed')
+        code = data.get('country_code', '')
+        require(re.fullmatch(r'[A-Z]{2}', code) and code != 'ZZ', 'Unknown country')
+        s['country_code'] = code
+        save(s)
+    except (RuntimeError, ValueError, subprocess.SubprocessError):
+        print('Country lookup unavailable; using neutral globe and retrying on next run')
+
+
+TROJAN_WS_PORT = 10443
+
+def native_ws_path(s):
+    # Only init() for a new managed installation creates this state key.
+    path = s.get('trojan_ws_path')
+    if 'trojan_ws_path' in s:
+        require(isinstance(path, str) and re.fullmatch(r'/trojan-ws-[a-f0-9]{32}', path),
+                'Invalid managed Trojan WS path')
+    return path
+
+def inbound_names(s):
+    return CLIENT_NAMES + (('trojan_ws',) if native_ws_path(s) else ())
+
+def trojan_ws_location(s):
+    path = native_ws_path(s)
+    if not path:
+        return ''
+    return (f'    location = {path} {{\n'
+            f'        proxy_pass http://127.0.0.1:{TROJAN_WS_PORT};\n'
+            '        proxy_http_version 1.1;\n'
+            '        proxy_set_header Host $host;\n'
+            '        proxy_set_header Upgrade $http_upgrade;\n'
+            '        proxy_set_header Connection "upgrade";\n'
+            '        proxy_read_timeout 1h;\n    }\n')
+
+def inbound_payloads(s):
+    tls = dict(serverName=s['domain'], minVersion='1.2', maxVersion='1.3', alpn=['h3'],
+               certificates=[dict(certificateFile=certificate_dir(s)+'fullchain.pem', keyFile=certificate_dir(s)+'privkey.pem', usage='encipherment')],
+               settings=dict(serverName=s['domain'], allowInsecure=False, fingerprint='chrome'))
+    streams = {
+        'reality': dict(network='tcp', security='reality', tcpSettings=dict(acceptProxyProtocol=False, header=dict(type='none')),
+                        realitySettings=dict(show=False, target='127.0.0.1:7443', xver=0, serverNames=[s['reality_domain']],
+                        privateKey=s['private_key'], shortIds=[s['short_id']], settings=dict(publicKey=s['public_key'], fingerprint='chrome', serverName=s['reality_domain'], spiderX='/'))),
+        'ws': dict(network='ws', security='none', wsSettings=dict(path=s['ws_path'], headers={})),
+        'xhttp': dict(network='xhttp', security='none', xhttpSettings=dict(path=s['xhttp_path'], mode='stream-up', host=s['domain'])),
+        'grpc': dict(network='grpc', security='none', grpcSettings=dict(serviceName=s['grpc_service'], multiMode=False)),
+        'hysteria': dict(network='hysteria', security='tls', tlsSettings=tls, hysteriaSettings=dict(version=2, udpIdleTimeout=60)),
+    }
+    result = []
+    for name, port in [('reality',8443), ('ws',10001), ('xhttp',10002), ('grpc',10003), ('hysteria',443)]:
+        protocol = 'hysteria' if name == 'hysteria' else 'trojan' if name == 'grpc' else 'vless'
+        client = dict(email=client_label(name), enable=True, subId=s['sub_ids'].get(name, ''), limitIp=0, totalGB=0, expiryTime=0, reset=0, tgId=0)
+        if protocol == 'vless':
+            client.update(id=s['uuids'][name], flow='xtls-rprx-vision' if name == 'reality' else '')
+        elif protocol == 'trojan':
+            client['password'] = s['trojan_password']
+        else:
+            client['auth'] = s['hysteria_auth']
+        settings = dict(clients=[client] if name in s.get('seed_clients', CLIENT_NAMES) else [])
+        if protocol == 'vless':
+            settings.update(decryption='none', fallbacks=[])
+        if protocol == 'hysteria':
+            settings['version'] = 2
+        stream = streams[name]
+        stream['externalProxy'] = [dict(forceTls='same' if name in ('reality','hysteria') else 'tls',
+                                        dest=s['domain'], port=443, remark=inbound_label(s, name),
+                                        sni=s['reality_domain'] if name == 'reality' else s['domain'])]
+        result.append(dict(remark=inbound_label(s, name), enable=True, listen=(s['ip'] if s.get('secondary_ip') else '0.0.0.0') if name=='hysteria' else '127.0.0.1',
+                           port=port, protocol=protocol, settings=json.dumps(settings), streamSettings=json.dumps(stream),
+                           sniffing=json.dumps(dict(enabled=False, destOverride=['http','tls','quic'])),
+                           allocate=json.dumps(dict(strategy='always', refresh=5, concurrency=3)), total=0, expiryTime=0))
+    path = native_ws_path(s)
+    if path:
+        # Match the clean install's single-client policy: attach users in the panel.
+        result.append(dict(remark=inbound_label(s, 'trojan_ws'), enable=True, listen='127.0.0.1',
+                           port=TROJAN_WS_PORT, protocol='trojan', settings=json.dumps(dict(clients=[])),
+                           streamSettings=json.dumps(dict(network='ws', security='none', wsSettings=dict(path=path),
+                               externalProxy=[dict(forceTls='tls', dest=s['domain'], port=443,
+                                   remark=inbound_label(s, 'trojan_ws'), sni=s['domain'])])),
+                           sniffing=json.dumps(dict(enabled=False)), allocate=json.dumps(dict(strategy='always')),
+                           total=0, expiryTime=0))
+    return result
+
+def split_subscriptions(s, api, rows):
+    """Migrate only the original five installer clients, preserving other fields."""
+    if 'sub_ids' in s:
+        return
+    legacy = s.get('sub_id')
+    require(bool(legacy), 'Missing subscription state')
+    plans = []
+    ids = {name: secrets.token_hex(16) for name in CLIENT_NAMES}
+    # Validate all five before any mutation; unknown/manual layouts need review.
+    for name in CLIENT_NAMES:
+        matches = [row for row in rows if row.get('remark') == 'single443-'+name]
+        require(len(matches) == 1, 'Migration requires exactly five original managed inbounds')
+        row = dict(matches[0])
+        settings = json_object(row['settings'])
+        clients = settings.get('clients', [])
+        require(len(clients) == 1, 'Migration refuses inbounds with additional clients')
+        client = clients[0]
+        require(client.get('email') == 'single443-'+name and client.get('subId') == legacy,
+                'Managed client identity/subscription changed; migration refused')
+        credential = 'id' if name in ('reality','ws','xhttp') else 'password' if name == 'grpc' else 'auth'
+        expected = s['uuids'][name] if credential == 'id' else s['trojan_password'] if credential == 'password' else s['hysteria_auth']
+        require(client.get(credential) == expected, 'Managed credentials changed; migration refused')
+        client['subId'] = ids[name]
+        row['settings'] = json.dumps(settings)
+        plans.append(row)
+    payloads = []
+    for row in plans:
+        client = json_object(row['settings'])['clients'][0]
+        info = api.call('clients/get/'+urllib.parse.quote(client['email'], safe=''))
+        require(info.get('inboundIds') == [row['id']], 'Legacy client has additional attachments; migration refused')
+        payloads.append(dict(client, limitHwid=info['client'].get('limitHwid', 0)))
+    for client in payloads:
+        api.call('clients/update/'+urllib.parse.quote(client['email'], safe=''), client)
+    verified = api.call('inbounds/list')
+    for row in plans:
+        actual = [x for x in verified if x.get('id') == row['id']]
+        require(len(actual) == 1, 'Migration API verification failed')
+        expected = json_object(row['settings'])['clients'][0]
+        clients = json_object(actual[0]['settings']).get('clients', [])
+        require(len(clients) == 1 and all(clients[0].get(k) == v for k, v in expected.items()
+                if k not in ('updated_at', 'updatedAt', 'limitHwid')),
+                'Migration did not preserve client fields; rolling back')
+    s['sub_ids'] = ids
+    s.pop('sub_id', None)
+    save(s)
+
+
+def configure_amnezia(s, api):
+    require(supported_panel_version(s.get('installed_version', '')), 'Unsupported AmneziaWG adapter version')
+    name = 'amneziawg'
+    port = 443 if s.get('secondary_ip') else 51820
+    listen = s.get('secondary_ip', '0.0.0.0')
+    label = inbound_label(s, name)
+    rows = api.call('inbounds/list')
+    saved_id = s['inbound_ids'].get(name)
+    matches = [row for row in rows if (row.get('id') == saved_id if saved_id is not None
+               else row.get('remark') == label)]
+    require(len(matches) <= 1, 'Ambiguous AmneziaWG inbound')
+    if not matches:
+        require(not any(row.get('port') == port and row.get('listen') in ('', '0.0.0.0', '::', listen) for row in rows), 'AmneziaWG port/address already assigned in panel')
+        occupied = subprocess.check_output(['ss','-H','-lnu',f'sport = :{port}'], text=True)
+        require(not any(line.split()[3] in (f'0.0.0.0:{port}', f'*:{port}', f'[::]:{port}', f'{listen}:{port}') for line in occupied.splitlines()), 'AmneziaWG socket already occupied')
+        seeded = name in s.get('seed_clients', MANAGED_NAMES)
+        if seeded:
+            s['sub_ids'].setdefault(name, secrets.token_hex(16))
+        # The upstream API generates the server obfuscation, keypairs and tunnel
+        # address. Do not invent parameters or install a competing AWG daemon.
+        client = dict(email=client_label(name), enable=True, subId=s['sub_ids'].get(name, ''),
+                      totalGB=0, expiryTime=0, limitIp=0)
+        api.call('inbounds/add', dict(remark=label, enable=True, listen=listen, port=port,
+                 protocol='amneziawg', shareAddrStrategy='custom', shareAddr=s.get('secondary_ip', s['domain']),
+                 settings=json.dumps(dict(clients=[])),
+                 streamSettings='{}', sniffing='{}', allocate='{}', total=0, expiryTime=0))
+        matches = [row for row in api.call('inbounds/list') if row.get('remark') == label]
+        require(len(matches) == 1, 'AmneziaWG creation could not be verified')
+        if seeded:
+            api.call('clients/add', dict(client=client, inboundIds=[matches[0]['id']]))
+        matches = [row for row in api.call('inbounds/list') if row.get('id') == matches[0]['id']]
+        require(len(matches) == 1, 'AmneziaWG client creation could not be verified')
+    row = matches[0]
+    require(row.get('protocol') == name and row.get('port') == port and row.get('enable') is True and
+            (not s.get('secondary_ip') or row.get('listen') == listen),
+            'Managed AmneziaWG topology changed')
+    data = json_object(row['settings'])
+    clients = [c for c in data.get('clients',[]) if s['sub_ids'].get(name)
+               and c.get('subId') == s['sub_ids'][name]]
+    if name in s.get('seed_clients', MANAGED_NAMES):
+        require(len(clients) == 1, 'Managed AmneziaWG subscription changed')
+        require(all(clients[0].get(key) for key in ('privateKey','publicKey','allowedIPs'))
+                and data.get('server',{}).get('privateKey'), 'Upstream did not generate AWG keys/address')
+    s['inbound_ids'][name] = row['id']
+    if row['remark'] != label:
+        api.call('inbounds/update/'+str(row['id']), dict(row, remark=label))
+    save(s)
+
+
+def inbounds():
+    s = load()
+    require(supported_panel_version(s.get('installed_version', '')), 'Unsupported panel adapter version')
+    api = API(s)
+    if 'private_key' not in s:
+        keys = api.call('server/getNewX25519Cert')
+        for name in ('privateKey', 'publicKey'):
+            require(re.fullmatch(r'[A-Za-z0-9_-]{43}', keys[name]), 'Unexpected X25519 key format')
+        s.update(private_key=keys['privateKey'], public_key=keys['publicKey'])
+        save(s)
+    existing = api.call('inbounds/list')
+    require(isinstance(existing, list), 'Unknown inbound list schema')
+    split_subscriptions(s, api, existing)
+    existing = api.call('inbounds/list')  # Migration may have changed client subIds.
+    detect_country(s)
+    s.setdefault('inbound_ids', {})
+    for name, item in zip(inbound_names(s), inbound_payloads(s), strict=True):
+        saved_id = s['inbound_ids'].get(name)
+        matches = [x for x in existing if (x.get('id') == saved_id if saved_id is not None
+                   else x.get('remark') in (item['remark'], 'single443-'+name))]
+        require(len(matches) <= 1, 'Duplicate managed inbound; refusing ambiguous update')
+        if matches:
+            # Preserve users, counters and manual panel changes. Verify essential topology only.
+            old = matches[0]
+            require(all(old.get(k) == item[k] for k in ('port', 'protocol', 'listen', 'enable')), 'Managed inbound topology changed; refusing to overwrite')
+            stream = json_object(old['streamSettings'])
+            expected = json_object(item['streamSettings'])
+            require(all(stream.get(k) == expected[k] for k in ('network','security')), 'Managed transport/security changed')
+            for block, keys in {'wsSettings':('path',), 'xhttpSettings':('path','mode','host'),
+                                'grpcSettings':('serviceName',), 'realitySettings':('target','serverNames','privateKey','shortIds'),
+                                'hysteriaSettings':('version',)}.items():
+                if block in expected:
+                    actual = stream.get(block,{})
+                    if block == 'realitySettings' and 'target' not in actual and 'dest' in actual:
+                        actual = dict(actual, target=actual['dest'])
+                    require(all(actual.get(k) == expected[block][k] for k in keys), 'Managed path/key/topology changed; existing clients preserved')
+            # Only display names change; stable IDs and credentials stay untouched.
+            s['inbound_ids'][name] = old['id']
+            desired_proxy = [dict(proxy, remark=item['remark']) for proxy in stream.get('externalProxy', expected['externalProxy'])]
+            if old['remark'] != item['remark'] or stream.get('externalProxy') != desired_proxy:
+                updated = dict(old, remark=item['remark'])
+                stream['externalProxy'] = desired_proxy
+                updated['streamSettings'] = json.dumps(stream)
+                api.call('inbounds/update/'+str(old['id']), updated)
+            continue
+        require(not any(x.get('port') == item['port'] for x in existing), 'Inbound port conflict')
+        api.call('inbounds/add', item)
+        created = [row for row in api.call('inbounds/list') if row.get('remark') == item['remark']]
+        require(len(created) == 1, 'Created inbound not uniquely identified')
+        s['inbound_ids'][name] = created[0]['id']
+    save(s)
+    configure_amnezia(s, api)
+    rename_clients(s, api)
+    if 'amneziawg' in s.get('seed_clients', MANAGED_NAMES):
+        export_amnezia(s, api)
+    settings = api.call('setting/all', {})
+    require('subTitle' in settings, 'Upstream subscription title setting unavailable')
+    if settings['subTitle'] != 'Casper area':
+        settings['subTitle'] = 'Casper area'
+        api.call('setting/update', settings)
+    routing_changes = dict(subIncyEnableRouting=True,
+                           subIncyRoutingRules='https://'+s['domain']+'/routing/incy.json')
+    if set(routing_changes) <= set(settings):
+        if any(settings[k] != v for k, v in routing_changes.items()):
+            settings.update(routing_changes)
+            api.call('setting/update', settings)
+    else:
+        print('INCY routing settings unavailable in this panel version; static URL remains available')
+    candidate = api.call('server/getConfigJson')
+    require(isinstance(candidate, dict) and 'inbounds' in candidate, 'No generated Xray config from API')
+    write_json(STATE/'candidate-xray.json', candidate)
+    binaries = list(Path('/usr/local/x-ui/bin').glob('xray-linux-*'))
+    require(len(binaries) == 1, 'Ambiguous Xray binary')
+    env = dict(os.environ, XRAY_LOCATION_ASSET='/usr/local/x-ui/bin')
+    result = subprocess.run([str(binaries[0]), 'run', '-test', '-config', str(STATE/'candidate-xray.json')], env=env, cwd='/usr/local/x-ui', stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    (STATE/'xray-validation.log').write_bytes(result.stdout)
+    require(result.returncode == 0, 'Generated Xray config invalid; see /etc/single443/xray-validation.log')
+    run(['systemctl', 'restart', 'x-ui'])
+    wait_panel()
+    s['configured'] = True
+    save(s)
+
+def sub_locations(d):
+    proto = 'https' if d['tls'] else 'http'
+    addr = '['+d['address']+']' if ':' in d['address'] else d['address']
+    # Public aliases are mapped to discovered paths, never to an assumed /sub/.
+    mapping = {p: None for p in d['paths']}
+    if d['clash_path']:
+        for alias in ('/mihomo/', '/clash/'):
+            mapping.setdefault(alias, d['clash_path'])
+    blocks = []
+    for public, target in mapping.items():
+        lines = [f'    location ^~ {public} {{', f'        proxy_pass {proto}://{addr}:{d["port"]}{target or ""};',
+                 '        proxy_http_version 1.1;', f'        proxy_set_header Host {d["host"]};',
+                 '        proxy_set_header X-Forwarded-Host $host;', '        proxy_set_header X-Forwarded-Proto https;',
+                 '        proxy_set_header X-Forwarded-For $remote_addr;', '        proxy_buffering off;',
+                 '        proxy_read_timeout 120s;', '        proxy_redirect off;']
+        if d['tls']:
+            lines += ['        proxy_ssl_server_name on;', f'        proxy_ssl_name {d["host"]};',
+                      '        proxy_ssl_verify on;', '        proxy_ssl_trusted_certificate /etc/ssl/certs/ca-certificates.crt;',
+                      '        proxy_ssl_verify_depth 5;']
+        blocks.append('\n'.join(lines+['    }']))
+    return '\n'.join(blocks)
+
+def preserve_sponsor_filter(text, panel_path, current):
+    """Carry forward only the exact opt-in filter; regenerate its panel path."""
+    begin = '    # BEGIN single443-sponsor-filter v1\n'
+    end = '    # END single443-sponsor-filter v1\n'
+    old = current.read_text() if current.exists() else ''
+    if begin not in old and end not in old:
+        return text
+    require(old.count(begin) == old.count(end) == 1, 'Invalid sponsor filter markers')
+    start, stop = old.index(begin), old.index(end) + len(end)
+    require(stop > start, 'Invalid sponsor filter marker order')
+    block = old[start:stop]
+    match = re.search(r'location = (/[A-Za-z0-9_/-]+)sponsors \{', block)
+    require(match is not None, 'Invalid sponsor filter path')
+    old_path = match.group(1)
+    for path in (old_path, panel_path):
+        require(re.fullmatch(r'/[A-Za-z0-9_/-]+/', path) is not None and '//' not in path,
+                'Unsupported sponsor filter panel path')
+    def rules(path):
+        return (begin
+                + '    location = ' + path + 'sponsors {\n'
+                + '        default_type application/json;\n'
+                + '        add_header Cache-Control "no-store" always;\n'
+                + '        return 200 \'{"success":true,"msg":"","obj":{"contact":"","sponsors":[]}}\';\n'
+                + '    }\n'
+                + '    location ^~ ' + path + 'sponsors/logo/ {\n'
+                + '        return 404;\n'
+                + '    }\n' + end)
+    require(block == rules(old_path), 'Sponsor filter was edited manually; refusing to overwrite')
+    location = '    location ^~ ' + panel_path + ' {\n'
+    require(text.count(location) == 1, 'Cannot locate panel for sponsor filter')
+    require(begin not in text and end not in text, 'Unexpected filter in nginx template')
+    return text.replace(location, rules(panel_path) + location, 1)
+
+
+def render(templates):
+    s = load()
+    d = json.loads((STATE/'subscription.json').read_text())
+    replacements = {'DOMAIN':s['domain'], 'REALITY_DOMAIN':s['reality_domain'], 'PANEL_PATH':s['panel_path'],
+                    'TROJAN_WS_LOCATION':trojan_ws_location(s), 'WS_PATH':s['ws_path'], 'XHTTP_PATH':s['xhttp_path'], 'GRPC_SERVICE':s['grpc_service'],
+                    'CERT_DIR':certificate_dir(s), 'SUB_LOCATIONS':sub_locations(d),
+                    'MASQUE_ROUTE':masque_route(s)}
+    rendered = []
+    for source, target in [('nginx-stream.conf.tpl','/etc/nginx/single443-stream.conf'),
+                           ('nginx-web.conf.tpl','/etc/nginx/conf.d/single443-web.conf')]:
+        text = (Path(templates)/source).read_text()
+        for key,value in replacements.items():
+            text = text.replace('@'+key+'@', value)
+        require(not re.search(r'@[A-Z_]+@',text), 'Unresolved nginx template')
+        if source == 'nginx-web.conf.tpl':
+            text = preserve_sponsor_filter(text, s['panel_path'], Path(target))
+        rendered.append((target, text))
+    for target, text in rendered:
+        Path(target).write_text(text)
+        Path(target).chmod(0o644)
+    main = Path('/etc/nginx/nginx.conf')
+    include = 'include /etc/nginx/single443-stream.conf;'
+    text = main.read_text()
+    if include not in text:
+        main.write_text(text+'\n'+include+'\n')
+    Path('/etc/nginx/conf.d/single443-acme.conf').unlink(missing_ok=True)
+    routing = Path('/var/www/single443/routing')
+    routing.mkdir(parents=True, exist_ok=True)
+    # User-supplied INCY profile: publish the exact bytes, without normalization.
+    profile = (Path(templates)/'routing/incy.json').read_bytes()
+    require(isinstance(json.loads(profile), dict), 'Invalid INCY JSON')
+    (routing/'incy.json').write_bytes(profile)
+    (routing/'incy.json').chmod(0o644)
+    for name in ('clash.yaml', 'mihomo.yaml'):
+        f = routing/name
+        if not f.exists():
+            f.write_text('# Empty domain rule-provider; customize before use.\npayload: []\n')
+            f.chmod(0o644)
+    access = f'Panel: https://{s["domain"]}{s["panel_path"]}\nUsername: {s["username"]}\nPassword: {s["password"]}\n'
+    for name, sub_id in s['sub_ids'].items():
+        access += f'\n{name} subscription: https://{s["domain"]}{d["main_path"]}{sub_id}\n'
+        if d.get('json_path'):
+            access += f'{name} Xray JSON: https://{s["domain"]}{d["json_path"]}{sub_id}\n'
+        if d['clash_path'] and name != 'amneziawg':
+            access += f'{name} Mihomo: https://{s["domain"]}{d["clash_path"]}{sub_id}\n'
+    if 'amneziawg' in s.get('seed_clients', MANAGED_NAMES):
+        access += '\nAmneziaWG native config (private): /etc/single443/User6-AmneziaWG.conf\n'
+    access += f'\nINCY routing: https://{s["domain"]}/routing/incy.json\n'
+    (STATE/'access.txt').write_text(access)
+    (STATE/'access.txt').chmod(0o600)
+
+def curl_body(host, port, path, tls=True, address=None, user_agent='curl/single443'):
+    url = f'{"https" if tls else "http"}://{host}:{port}{path}'
+    args = ['curl','--noproxy','*','-fLsS','--max-time','20','--max-redirs','0','-A',user_agent]
+    if address:
+        args += ['--resolve', f'{host}:{port}:{"["+address+"]" if ":" in address else address}']
+    result = subprocess.run(args+[url], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    require(result.returncode == 0, 'HTTP/TLS request failed (details omitted to protect secret URL)')
+    return result.stdout
+
+def validate_links(body, s, name=None):
+    text = body.decode().strip()
+    if not re.search(r'(?:vless|trojan|hy2|hysteria2|vpn)://', text):
+        try:
+            text = base64.b64decode(text+'='*(-len(text)%4),validate=True).decode()
+        except (ValueError, UnicodeError):
+            raise RuntimeError('Subscription returned neither links nor valid base64; possible profile HTML') from None
+    urls = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # Upstream appends INCY routing instructions to raw subscriptions,
+        # including before base64 encoding. They are not proxy connections.
+        if line.startswith(('incy://autorouting/onadd/', 'incy://routing/onadd/')):
+            continue
+        require(urllib.parse.urlsplit(line).scheme in ('vless','trojan','hy2','hysteria2','vpn'),
+                'Unexpected subscription entry type')
+        urls.append(line)
+    expected_count = 1 if name else 5
+    require(len(urls) == expected_count,
+            f'Unexpected subscription client count: expected {expected_count}, got {len(urls)}')
+    if name == 'amneziawg':
+        require(urls[0].startswith('vpn://'), 'AmneziaWG vpn export missing')
+        encoded = urls[0][6:]
+        config = base64.b64decode(encoded+'='*(-len(encoded)%4), altchars=b'-_', validate=True).decode()
+        require('[Interface]' in config and '[Peer]' in config and 'PrivateKey = ' in config,
+                'Incomplete AmneziaWG client export')
+        endpoints = re.findall(r'^Endpoint\s*=\s*(.+)$', config, re.M)
+        require(len(endpoints) == 1 and endpoints[0].strip() in
+                ((s['secondary_ip']+':443',) if s.get('secondary_ip') else (s['domain']+':51820', s['ip']+':51820')), 'Incorrect AmneziaWG endpoint')
+        return
+    managed = []
+    for url in urls:
+        u = urllib.parse.urlsplit(url)
+        if u.hostname != s['domain']:
+            continue
+        q=urllib.parse.parse_qs(u.query)
+        require(u.port == 443, 'Subscription advertises an internal port')
+        managed.append((u.scheme, q.get('type',[''])[0], q.get('security',[''])[0]))
+    expected = {
+        'reality': {('vless','tcp','reality'), ('vless','raw','reality')},
+        'ws': {('vless','ws','tls')}, 'xhttp': {('vless','xhttp','tls')},
+        'grpc': {('trojan','grpc','tls')},
+    }
+    for key in ([name] if name else CLIENT_NAMES):
+        if key == 'hysteria':
+            require(any(x[0] in ('hysteria2','hy2') for x in managed), 'Hysteria2 link missing')
+        else:
+            require(bool(expected[key].intersection(managed)), key+' external link missing')
+
+
+def awg_listener_required(s):
+    # Inspect live panel state, not the install-time seed policy: users may
+    # have added peers since installation. Only a verified empty inbound skips.
+    rows = API(s).call('inbounds/list')
+    matches = [r for r in rows if r.get('id') == s['inbound_ids']['amneziawg']]
+    require(len(matches) == 1, 'Managed AmneziaWG inbound missing or ambiguous')
+    row = matches[0]
+    require(row.get('protocol') == 'amneziawg' and row.get('enable') is True,
+            'Managed AmneziaWG inbound disabled or changed')
+    clients = json_object(row['settings']).get('clients')
+    require(isinstance(clients, list), 'Invalid AmneziaWG clients configuration')
+    return bool(clients)
+
+
+def diagnose():
+    s=load()
+    failures=[]
+    def check(label, action):
+        try:
+            action()
+            print('PASS '+label)
+        except Exception as e:
+            print('FAIL '+label+': '+str(e))
+            failures.append(label)
+    check('nginx configuration', lambda: run(['nginx','-t']))
+    for service in ('x-ui','nginx'):
+        check(service+' active', lambda service=service: run(['systemctl','is-active','--quiet',service]))
+    check('panel API authentication', lambda: API(s))
+    if s.get('inbound_ids', {}).get('masque'):
+        check('MASQUE TLS/SNI/h2 and panel state', verify_masque)
+        check('MASQUE certificate lifetime', lambda: run(['openssl', 'x509', '-checkend', '604800',
+              '-noout', '-in', MASQUE_CERT+'fullchain.pem']))
+    check('certificate remaining lifetime', lambda: run(['openssl','x509','-checkend',
+          '86400' if s.get('ip_tls') == 'yes' else '604800','-noout','-in',certificate_dir(s)+'fullchain.pem']))
+    if s.get('ip_tls') == 'yes':
+        check('certificate IP SAN', lambda: run(['openssl','x509','-noout','-checkip',s['ip'],
+              '-in',certificate_dir(s)+'fullchain.pem']))
+    check('certificate REALITY DNS SAN', lambda: run(['openssl','x509','-noout','-checkhost',s['reality_domain'],
+          '-in',certificate_dir(s)+'fullchain.pem']))
+    for port in (2053,7443,8443,10001,10002,10003) + ((TROJAN_WS_PORT,) if native_ws_path(s) else ()):
+        def tcp(port=port):
+            with socket.create_connection(('127.0.0.1',port),timeout=3):
+                pass
+        check('local TCP '+str(port),tcp)
+    awg_required = True
+    def awg_state():
+        nonlocal awg_required
+        awg_required = awg_listener_required(s)
+    check('AmneziaWG panel state', awg_state)
+    if s.get('secondary_ip'):
+        check('separate Hysteria2/AWG UDP addresses', lambda: verify_secondary_sockets(s, awg_required))
+    def udp():
+        text=subprocess.check_output(['ss','-H','-lunp','sport = :443'],text=True)
+        require('xray' in text.lower(), 'Xray is not listening on UDP/443')
+    check('Hysteria2 UDP listener (not a protocol handshake)',udp)
+    def awg_udp():
+        for _ in range(15):
+            text = subprocess.check_output(['ss','-H','-lnup','sport = :'+str(443 if s.get('secondary_ip') else 51820)], text=True)
+            if 'x-ui' in text:
+                return
+            time.sleep(1)
+        raise RuntimeError('Panel AmneziaWG UDP listener absent')
+    if awg_required:
+        check('AmneziaWG UDP listener (not a protocol handshake)', awg_udp)
+    else:
+        print('SKIP AmneziaWG UDP listener: verified empty inbound; upstream starts it when peers are added')
+    check('decoy via local SNI dispatcher',lambda: require(b'Field Notes' in curl_body(s['domain'],443,'/',address='127.0.0.1'),'Unexpected decoy'))
+    check('REALITY unauthenticated TLS fallback',lambda: require(b'Field Notes' in curl_body(s['reality_domain'],443,'/',address='127.0.0.1'),'Unexpected fallback'))
+    check('public decoy URL from VPS',lambda: require(b'Field Notes' in curl_body(s['domain'],443,'/'),'Unexpected decoy'))
+    check('public panel URL from VPS',lambda: curl_body(s['domain'],443,s['panel_path']))
+    try:
+        d=discover()
+        for name, sub_id in s['sub_ids'].items():
+            check(name+' subscription backend with Host/SNI',lambda name=name, sub_id=sub_id: validate_links(curl_body(d['host'],d['port'],d['main_path']+sub_id,d['tls'],d['address'],'v2rayN/7.0'),s,name))
+            check(name+' public subscription: exactly one client',lambda name=name, sub_id=sub_id: validate_links(curl_body(s['domain'],443,d['main_path']+sub_id,user_agent='v2rayN/7.0'),s,name))
+            if d['clash_path'] and name != 'amneziawg':
+                check(name+' public Mihomo subscription',lambda sub_id=sub_id: require(b'proxies:' in curl_body(s['domain'],443,d['clash_path']+sub_id,user_agent='mihomo/1.19'),'Unexpected Mihomo body'))
+    except Exception as e:
+        failures.append('discovery')
+        print('FAIL subscription discovery: '+str(e))
+    for name in ('incy.json','clash.yaml','mihomo.yaml'):
+        check('routing file '+name,lambda name=name: curl_body(s['domain'],443,'/routing/'+name))
+    def bindings():
+        text=subprocess.check_output(['ss','-H','-lnt'],text=True)
+        ports = {2053,2096,7443,8443,10001,10002,10003}
+        if native_ws_path(s): ports.add(TROJAN_WS_PORT)
+        if s.get('inbound_ids', {}).get('masque'): ports.add(MASQUE_PORT)
+        saved = STATE/'subscription.json'
+        if saved.exists():
+            ports.add(json.loads(saved.read_text())['port'])
+        for line in text.splitlines():
+            local=line.split()[3]
+            if int(local.rsplit(':',1)[1]) in ports:
+                require(local.startswith(('127.0.0.1:','[::1]:')), 'Internal backend exposed on wildcard address')
+    check('internal listeners restricted to loopback',bindings)
+    print('Authenticated proxy handshakes, UDP reachability from another network and large uploads require client-side VPS acceptance tests; not established here.')
+    require(not failures, str(len(failures))+' diagnostic checks failed')
+
+
+def secondary_preflight(s, address):
+    require(supported_panel_version(s.get('installed_version', '')), 'Unsupported secondary-IP adapter version')
+    require(str(ipaddress.IPv4Address(address)) == address and address != s['ip'], 'Expected a distinct IPv4')
+    require(not s.get('secondary_ip') or s['secondary_ip'] == address, 'Another secondary IP is already configured')
+    interfaces = json.loads(subprocess.check_output(['ip', '-j', '-4', 'address', 'show'], text=True))
+    local = {a['local'] for i in interfaces for a in i.get('addr_info', [])}
+    require({s['ip'], address} <= local, 'Both public IPv4 addresses must already be configured in Ubuntu')
+    rows = API(s).call('inbounds/list')
+    for name, protocol in [('hysteria', 'hysteria'), ('amneziawg', 'amneziawg')]:
+        matches = [r for r in rows if r['id'] == s.get('inbound_ids', {}).get(name)]
+        require(len(matches) == 1 and matches[0]['protocol'] == protocol and matches[0]['enable'],
+                'Missing/disabled managed '+name+' inbound')
+    return rows
+
+
+def wait_udp(address, port, process):
+    for _ in range(30):
+        output = subprocess.check_output(['ss', '-H', '-lnup', 'sport = :'+str(port)], text=True)
+        if any(line.split()[3] == f'{address}:{port}' and process in line for line in output.splitlines()):
+            return
+        time.sleep(1)
+    raise RuntimeError(f'{process} did not bind {address}:{port}')
+
+
+def verify_secondary_sockets(s, awg_required=None):
+    if awg_required is None:
+        # Empty embedded AWG inbounds may not open a socket. Verify the actual
+        # API binding even then, including after the panel has restarted.
+        rows = API(s).call('inbounds/list')
+        matches = [r for r in rows if r.get('id') == s['inbound_ids']['amneziawg']]
+        require(len(matches) == 1, 'Managed AmneziaWG inbound missing or ambiguous')
+        row = matches[0]
+        require(row.get('protocol') == 'amneziawg' and row.get('enable') is True and
+                row.get('listen') == s['secondary_ip'] and row.get('port') == 443,
+                'AmneziaWG secondary binding changed')
+        clients = json_object(row['settings']).get('clients')
+        require(isinstance(clients, list), 'Invalid AmneziaWG clients configuration')
+        awg_required = bool(clients)
+    wait_udp(s['ip'], 443, 'xray')
+    if awg_required:
+        wait_udp(s['secondary_ip'], 443, 'x-ui')
+    output = subprocess.check_output(['ss', '-H', '-lnup', 'sport = :443'], text=True)
+    require(not any(line.split()[3] in ('*:443', '0.0.0.0:443', '[::]:443')
+                    for line in output.splitlines()), 'Wildcard UDP/443 remains')
+
+
+def attach_secondary(address):
+    s = load()
+    rows = secondary_preflight(s, address)
+    api = API(s)
+    originals = {name: next(r for r in rows if r['id'] == s['inbound_ids'][name])
+                 for name in ('hysteria', 'amneziawg')}
+    # Release the wildcard UDP socket before moving AWG onto the same port.
+    hy = originals['hysteria']
+    api.call('inbounds/update/'+str(hy['id']), dict(hy, listen=s['ip']))
+    api.call('server/restartXrayService', {})
+    wait_udp(s['ip'], 443, 'xray')
+    awg = originals['amneziawg']
+    api.call('inbounds/update/'+str(awg['id']), dict(awg, listen=address, port=443,
+             shareAddrStrategy='custom', shareAddr=address))
+    desired = dict(s, secondary_ip=address)
+    verify_secondary_sockets(desired)
+    after = api.call('inbounds/list')
+    for name, old in originals.items():
+        new = next(r for r in after if r['id'] == old['id'])
+        for field in ('settings', 'streamSettings', 'sniffing'):
+            # AWG has nullable stream/sniffing JSON; preserve null as well as objects.
+            before = json.loads(old[field]) if isinstance(old[field], str) and old[field] else old[field]
+            current = json.loads(new[field]) if isinstance(new[field], str) and new[field] else new[field]
+            require(current == before,
+                    name+' '+field+' unexpectedly changed; rollback required')
+    # Validate exports for every existing AWG peer, including manually created ones.
+    for client in json_object(awg['settings']).get('clients', []):
+        links = api.call('clients/links/'+urllib.parse.quote(client['email'], safe=''))
+        vpn = [link for link in links if link.startswith('vpn://')]
+        require(len(vpn) == 1, 'AWG client has ambiguous native exports')
+        validate_links(vpn[0].encode(), desired, 'amneziawg')
+    save(desired)
+    print('Secondary IP saved; client keys and inbound routing settings preserved')
+
+
+MASQUE_PORT = 10004
+XRAY_DIR = Path('/usr/local/x-ui')
+MASQUE_CERT = '/etc/letsencrypt/live/single443-masque/'
+MASQUE_PATH = '/.well-known/masque/ip/*/*/'
+
+
+def masque_route(s):
+    if not s.get('masque_domain') or not s.get('inbound_ids', {}).get('masque'):
+        return ''
+    return f"        {domain(s['masque_domain'])} 127.0.0.1:{MASQUE_PORT};"
+
+
+def masque_stream_text(text, s):
+    anchor = f"        {domain(s['reality_domain'])} 127.0.0.1:8443;"
+    route = masque_route(s)
+    require(bool(route) and text.count(anchor) == 1, 'Unrecognized SNI dispatcher')
+    if route in text:
+        require(text.count(route) == 1, 'Duplicate MASQUE SNI route')
+        return text
+    require(s['masque_domain'] not in text and '127.0.0.1:10004' not in text,
+            'Conflicting MASQUE SNI route')
+    return text.replace(anchor, anchor+'\n'+route, 1)
+
+
+def render_masque_stream():
+    path = Path('/etc/nginx/single443-stream.conf')
+    path.write_text(masque_stream_text(path.read_text(), load()))
+
+
+def masque_prepare():
+    s = load()
+    require(has_masque(panel_version()), 'Upgrade the panel to 3.10.0 or newer first')
+    saved = s.get('masque_domain')
+    name = domain(os.environ.get('MASQUE_DOMAIN') or saved or
+                  'masque.'+s['ip']+'.'+domain(os.environ.get('AUTO_DOMAIN_SUFFIX', 'cdn-one.org')))
+    require(not saved or saved == name, 'Changing an existing MASQUE domain requires manual migration')
+    require(name not in (s['domain'], s['reality_domain']), 'MASQUE requires a distinct SNI name')
+    require({x[4][0] for x in socket.getaddrinfo(name, None, socket.AF_INET)} == {s['ip']},
+            'MASQUE DNS A must point exclusively to IP1; set --masque-domain')
+    require(not subprocess.check_output(['dig', '+short', 'AAAA', name], text=True).strip(),
+            'MASQUE DNS must have no AAAA/CNAME records')
+    api = API(s)
+    rows = api.call('inbounds/list')
+    saved_id = s.get('inbound_ids', {}).get('masque')
+    conflicts = [x for x in rows if x.get('port') == MASQUE_PORT and x.get('id') != saved_id]
+    require(not conflicts, 'MASQUE backend port 10004 is already assigned')
+    if not saved_id:
+        require(not subprocess.check_output(['ss', '-H', '-lntup', 'sport = :10004'], text=True).strip(),
+                'MASQUE backend socket 10004 is occupied')
+        require(not any(x.get('remark') == 'MASQUE' for x in rows), 'Unmanaged MASQUE inbound exists')
+    s['masque_domain'] = name
+    save(s)
+
+
+def masque_payload(s):
+    name = domain(s['masque_domain'])
+    return dict(remark=inbound_label(s, 'masque'), enable=True, listen='127.0.0.1', port=MASQUE_PORT,
+                protocol='masque', settings=json.dumps(dict(clients=[], address=['10.14.0.1/24'], mtu=1400)),
+                streamSettings=json.dumps(dict(network='masque', security='tls',
+                    masqueSettings=dict(path=MASQUE_PATH),
+                    tlsSettings=dict(serverName=name, alpn=['h2'], minVersion='1.2',
+                        certificates=[dict(certificateFile=MASQUE_CERT+'fullchain.pem',
+                                           keyFile=MASQUE_CERT+'privkey.pem')],
+                        settings=dict(serverName=name, allowInsecure=False)),
+                    externalProxy=[dict(forceTls='tls', dest=name, port=443, sni=name, remark=inbound_label(s, 'masque'))])),
+                sniffing=json.dumps(dict(enabled=False, destOverride=['http', 'tls'])),
+                allocate='{}', total=0, expiryTime=0)
+
+
+def check_masque_row(row, s):
+    require(row.get('protocol') == 'masque' and row.get('listen') == '127.0.0.1' and
+            row.get('port') == MASQUE_PORT and row.get('enable') is True, 'MASQUE topology changed')
+    stream = json_object(row['streamSettings'])
+    require(stream.get('network') == 'masque' and stream.get('security') == 'tls' and
+            stream.get('tlsSettings', {}).get('alpn') == ['h2'] and
+            stream.get('masqueSettings', {}).get('path') == MASQUE_PATH,
+            'MASQUE transport changed; refusing to overwrite')
+    expected = json_object(masque_payload(s)['streamSettings'])
+    proxies = stream.get('externalProxy', [])
+    require([{k:v for k,v in proxy.items() if k != 'remark'} for proxy in proxies] ==
+            [{k:v for k,v in proxy.items() if k != 'remark'} for proxy in expected['externalProxy']],
+            'MASQUE public endpoint changed')
+    require(stream.get('tlsSettings', {}).get('certificates') == expected['tlsSettings']['certificates'],
+            'MASQUE certificate paths changed')
+
+
+def configure_masque():
+    s = load()
+    require(has_masque(panel_version()), 'MASQUE requires 3.10.0 or newer')
+    require(bool(s.get('masque_domain')), 'Run MASQUE preflight first')
+    api = API(s)
+    rows = api.call('inbounds/list')
+    saved_id = s.get('inbound_ids', {}).get('masque')
+    if saved_id:
+        matches = [x for x in rows if x.get('id') == saved_id]
+        require(len(matches) == 1, 'Managed MASQUE inbound missing')
+        row = matches[0]
+        check_masque_row(row, s)
+        # Upgrade the original unflagged labels only; preserve custom names.
+        stream = json_object(row['streamSettings'])
+        changed = row.get('remark') == 'MASQUE'
+        updated = dict(row)
+        if changed: updated['remark'] = inbound_label(s, 'masque')
+        for proxy in stream.get('externalProxy', []):
+            if proxy.get('remark') == 'MASQUE':
+                proxy['remark'] = inbound_label(s, 'masque')
+                changed = True
+        if changed:
+            updated['streamSettings'] = json.dumps(stream)
+            api.call('inbounds/update/'+str(saved_id), updated)
+            actual = next(x for x in api.call('inbounds/list') if x['id'] == saved_id)
+            check_masque_row(actual, s)
+            for key in ('settings', 'sniffing', 'listen', 'port', 'protocol', 'enable'):
+                require(actual.get(key) == row.get(key), 'MASQUE label update changed '+key)
+        return
+    require(not any(x.get('port') == MASQUE_PORT or x.get('remark') == 'MASQUE' for x in rows),
+            'MASQUE inbound conflict')
+    api.call('inbounds/add', masque_payload(s))
+    after = api.call('inbounds/list')
+    created = [x for x in after if x.get('id') not in {r['id'] for r in rows}]
+    require(len(created) == 1, 'MASQUE creation is ambiguous')
+    check_masque_row(created[0], s)
+    # Ignore live traffic counters, but ensure credentials, routing and listeners
+    # of every pre-existing inbound survive unchanged.
+    for old in rows:
+        matches = [x for x in after if x.get('id') == old['id']]
+        require(len(matches) == 1, 'Existing inbound disappeared')
+        for key in ('settings', 'streamSettings', 'sniffing', 'listen', 'port', 'protocol', 'enable'):
+            require(matches[0].get(key) == old.get(key), 'Existing inbound changed: '+key)
+    s.setdefault('inbound_ids', {})['masque'] = created[0]['id']
+    save(s)
+    candidate = api.call('server/getConfigJson')
+    require(isinstance(candidate, dict) and 'inbounds' in candidate, 'Unknown Xray config schema')
+    target = STATE/'candidate-masque.json'
+    write_json(target, candidate)
+    binaries = list((XRAY_DIR/'bin').glob('xray-linux-*'))
+    require(len(binaries) == 1, 'Ambiguous Xray binary')
+    subprocess.run([str(binaries[0]), 'run', '-test', '-config', str(target)],
+                   cwd=str(XRAY_DIR), env=dict(os.environ, XRAY_LOCATION_ASSET=str(XRAY_DIR/'bin')), check=True)
+    api.call('server/restartXrayService', {})
+
+
+def verify_masque():
+    s = load()
+    name = domain(s['masque_domain'])
+    # Test the public SNI dispatch locally with real certificate verification.
+    for attempt in range(5):
+        try:
+            result = subprocess.run(['openssl', 's_client', '-connect', '127.0.0.1:443',
+                                     '-servername', name, '-alpn', 'h2', '-verify_hostname', name,
+                                     '-verify_return_error'], input=b'', stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, timeout=5)
+            if result.returncode == 0 and b'ALPN protocol: h2' in result.stdout:
+                break
+        except subprocess.TimeoutExpired:
+            pass
+        if attempt == 4:
+            raise RuntimeError('MASQUE TLS/SNI/ALPN verification failed')
+        time.sleep(1)
+    check_masque_row(next(x for x in API(s).call('inbounds/list')
+                         if x['id'] == s['inbound_ids']['masque']), s)
+
+
+def main():
+    command=sys.argv[1]
+    if command=='init': init()
+    elif command=='value': print(load().get(sys.argv[2],''))
+    elif command=='masque-render': render_masque_stream()
+    elif command=='masque-prepare': masque_prepare()
+    elif command=='masque-add': configure_masque()
+    elif command=='masque-check': verify_masque()
+    elif command=='supported-version': require(supported_panel_version(sys.argv[2]), 'Unsupported stable version')
+    elif command=='has-masque': require(has_masque(sys.argv[2]), 'MASQUE requires 3.10.0 or newer')
+    elif command=='panel-version': print(panel_version())
+    elif command=='sync-panel-version': sync_panel_version()
+    elif command=='bootstrap-cli': bootstrap_cli()
+    elif command=='wait-panel': wait_panel()
+    elif command=='configure-panel': configure_panel()
+    elif command=='discover': discover()
+    elif command=='inbounds': inbounds()
+    elif command=='secondary-preflight': secondary_preflight(load(), sys.argv[2])
+    elif command=='attach-secondary': attach_secondary(sys.argv[2])
+    elif command=='secondary-verify': verify_secondary_sockets(load())
+    elif command=='wait-addresses':
+        s = load()
+        for attempt in range(60):
+            interfaces = json.loads(subprocess.check_output(['ip', '-j', '-4', 'address', 'show'], text=True))
+            local = {a['local'] for i in interfaces for a in i.get('addr_info', [])}
+            if {s['ip'], s.get('secondary_ip', s['ip'])} <= local:
+                break
+            time.sleep(1)
+        else:
+            raise RuntimeError('Required IPv4 addresses unavailable; refusing wildcard fallback')
+    elif command=='render-firewall':
+        s = load()
+        text = Path(sys.argv[2]).read_text()
+        if s.get('secondary_ip'):
+            ipaddress.IPv4Address(s['secondary_ip'])
+            text = text.replace('udp dport { 443, 51820 }', 'udp dport { 443 }')
+        Path(sys.argv[3]).write_text(text)
+    elif command=='render': render(sys.argv[2])
+    elif command=='diagnose': diagnose()
+    elif command=='verify-release':
+        artifact=Path(sys.argv[2])
+        release=json.loads(Path(sys.argv[3]).read_text())
+        assets=[a for a in release['assets'] if a['name']==artifact.name]
+        require(len(assets)==1, 'Release asset not uniquely identified')
+        digest=assets[0].get('digest','')
+        if not re.fullmatch(r'sha256:[a-f0-9]{64}', digest or ''):
+            sums=[a for a in release['assets'] if a['name']==artifact.name+'.sha256']
+            require(len(sums)==1, 'No upstream SHA256 digest/checksum; refusing unchecked release')
+            url=sums[0]['browser_download_url']
+            require(url.startswith('https://github.com/MHSanaei/3x-ui/releases/download/'), 'Unexpected checksum URL')
+            raw=subprocess.check_output(['curl','-fLsS','--retry','3',url],text=True)
+            matches=re.findall(r'\b[a-fA-F0-9]{64}\b',raw)
+            require(len(matches)==1,'Ambiguous checksum')
+            digest='sha256:'+matches[0].lower()
+        require(hashlib.sha256(artifact.read_bytes()).hexdigest()==digest[7:],'Release checksum mismatch')
+    elif command=='verify-checksum':
+        matches=re.findall(r'\b[a-fA-F0-9]{64}\b',Path(sys.argv[3]).read_text())
+        require(len(matches)==1,'Ambiguous release checksum')
+        require(hashlib.sha256(Path(sys.argv[2]).read_bytes()).hexdigest()==matches[0].lower(),'Release checksum mismatch')
+    else: raise RuntimeError('Unknown engine command')
+
+if __name__=='__main__':
+    try: main()
+    except Exception as error:
+        print('ERROR: '+str(error),file=sys.stderr)
+        sys.exit(1)
